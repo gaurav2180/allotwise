@@ -6,7 +6,7 @@ import {
   registrarSlugForMarket,
   getSubscription,
 } from '../db/index.js';
-import { availableSources } from '../gmp/index.js';
+import { availableSources, mergeBySlug } from '../gmp/index.js';
 import { parseSlug } from '../lib/validate.js';
 import { badRequest, notFound } from '../lib/errors.js';
 
@@ -37,7 +37,10 @@ function parseFilters(query) {
 marketRouter.get('/calendar', (req, res, next) => {
   try {
     const filters = parseFilters(req.query);
-    const ipos = listMarketIpos(filters);
+    // An explicit ?source= is a request for that source's own rows, so it is
+    // the one case where collapsing them would be wrong.
+    const rows = listMarketIpos(filters);
+    const ipos = filters.source ? rows : mergeBySlug(rows);
     res.json({
       count: ipos.length,
       filters,
@@ -93,7 +96,8 @@ marketRouter.get('/gmp', (req, res, next) => {
     }
 
     const filters = parseFilters(req.query);
-    const ipos = listMarketIpos(filters);
+    const rows = listMarketIpos(filters);
+    const ipos = filters.source ? rows : mergeBySlug(rows);
     res.json({
       count: ipos.length,
       filters,
@@ -148,7 +152,10 @@ marketRouter.get('/ipo/:slug', (req, res, next) => {
     const slug = parseSlug(req.params.slug);
     const rows = getMarketIpoBySlug(slug);
     if (rows.length === 0) throw notFound('IPO_NOT_FOUND', `No IPO known with slug "${slug}".`);
-    const primary = rows[0];
+    // Descriptive fields come from the merged view so a gap in the leading
+    // source is filled rather than shown as blank; `gmp` below stays per-source,
+    // which is the point of this endpoint.
+    const [primary] = mergeBySlug(rows);
     const subs = getSubscription(slug);
     const total = subs.find((s) => s.category === 'Total');
     const link = registrarSlugForMarket(slug);

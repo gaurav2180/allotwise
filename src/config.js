@@ -50,8 +50,10 @@ export const config = {
     ),
     timeoutMs: num(process.env.GMP_TIMEOUT_MS, 20000),
     // Sources to pull, comma-separated. Order is priority when the same IPO
-    // appears in more than one.
-    sources: str(process.env.GMP_SOURCES, 'ipowatch')
+    // appears in more than one. IPO Ji leads because IPO Watch has proven
+    // unreliable -- timeouts in production, Cloudflare 522s elsewhere -- and a
+    // frozen GMP table is worse than a second-choice one.
+    sources: str(process.env.GMP_SOURCES, 'ipoji,ipowatch')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),

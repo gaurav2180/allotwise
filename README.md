@@ -185,12 +185,30 @@ The tracker side (`/calendar`, `/gmp`) is fed by `market_ipos`, populated by
 `{ meta, fetchGmp }` and is isolated: a parse failure in one source is reported
 per-source and never sinks the others (`fetchAll` uses `Promise.allSettled`).
 
-**Sources.** Unlike the registrars, the major GMP sites offer no clean JSON API
-— InvestorGain and IPO Ji (Chittorgarh) are Next.js SPAs that render GMP into
-the DOM. **IPO Watch** is the exception and the current source: it
-server-renders clean HTML tables that carry GMP *and* calendar fields
-(dates, status, price band, est. listing + gain%) in one fetch, for both
-mainboard and SME. Adding a second source is one registry entry plus an adapter.
+**Sources.** Two, in the priority `GMP_SOURCES` gives (default `ipoji,ipowatch`).
+Neither offers a JSON API, so both are HTML adapters.
+
+- **IPO Ji** (`src/gmp/ipoji.js`) — the primary. Its listing page carries the
+  premium, percentage and indicative price as `data-` attributes and board and
+  status as an explicit vocabulary, so none of it is inferred from heading text
+  or column position; the offer dates are full and unambiguous
+  (`Sep 4, 2026 – Sep 8, 2026`), so there is no year to guess.
+- **IPO Watch** (`src/gmp/ipowatch.js`) — the fallback, and the original source.
+  It still covers issues IPO Ji has not indexed, but it is not dependable enough
+  to lead: every fetch from the deployed host timed out, and the same site
+  answered a home connection with Cloudflare 522s. A frozen GMP table is worse
+  than a second-choice one.
+
+`market_ipos` keys on `(source, slug)`, so an IPO both sites carry is two rows.
+`mergeBySlug` in `src/gmp/index.js` collapses them for the list endpoints: the
+highest-priority source *that actually quotes a premium* wins, and its quote is
+taken whole — mixing one tracker's premium with another's indicative price would
+produce a number neither published, and they disagree often enough for that to
+show. Only descriptive gaps are filled across sources. `?source=` bypasses the
+merge and returns that source's own rows.
+
+Adding a third source is one registry entry plus an adapter exposing
+`{ meta, fetchGmp }`.
 
 **GMP is unofficial** grey-market data. Every record is stamped with `source`
 and the site's own "last updated" text, and every response carries an
@@ -216,14 +234,22 @@ so the product can chart an IPO's grey-market trend over its run.
 `npm run sync:meta` and `npm run sync:subscription` fill the rest of an IPO card:
 
 - **NSE** (`src/market/nse.js`) — official JSON, the source for **subscription**
-  (`ipo-active-category?symbol=`, QIB/NII/Retail/Total × subscribed) and core
-  metadata (symbol, issue size, dates). NSE gates `/api` behind a session cookie,
-  so the adapter primes a cookie jar from the homepage and reuses it. **Mainboard
-  only** — SME issues are on NSE Emerge / BSE SME and are not wired yet.
-- **IPO Watch detail pages** — the full timeline (allotment/refund/listing dates),
-  lot size, min investment, face value, issue type, listing exchanges. Fetched
-  only for `upcoming`/`open` IPOs, bounded by `GMP_DETAIL_FETCH_LIMIT`, with a
-  delay between pages.
+  (`ipo-active-category?symbol=`, QIB/NII/Retail/Total × subscribed) and the
+  trading symbol. NSE gates `/api` behind a session cookie, so the adapter primes
+  a cookie jar from the homepage and reuses it. **Mainboard only** — SME issues
+  are on NSE Emerge / BSE SME and are not wired yet. Its issue size is a *share
+  count* and is deliberately not stored: a count is not what issues are compared
+  by, and multiplying it out does not reproduce the published rupee amount
+  (anchor and market-maker carve-outs sit outside it).
+- **IPO Ji detail pages** — issue size as published (`₹45.11 Cr`, or
+  `₹92.5 Cr Fresh + 76.74 Lakh OFS` when split), lot size, min investment,
+  listing exchanges, allotment and listing dates. Read from the page's
+  `fact-item` list, with its milestone timeline as a second reading of the dates.
+- **IPO Watch detail pages** — the same fields plus face value, issue type and
+  the refund date, used only when IPO Ji does not carry the issue.
+
+Detail pages are fetched only for `upcoming`/`open` IPOs, one row per slug,
+bounded by `GMP_DETAIL_FETCH_LIMIT`, with a delay between pages.
 
 NSE records are matched to existing market IPOs with the same fuzzy matcher used
 for registrar links. Subscription is stored as the latest snapshot per

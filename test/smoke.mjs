@@ -13,6 +13,8 @@ import { parseCompanies } from '../src/registrars/bigshare.js';
 import { getRegistrar, supportedRegistrars } from '../src/registrars/index.js';
 import { parseDateRange, normalizeStatus, parseRupees, parseEstListing } from '../src/lib/marketDates.js';
 import { parse as parseIpoWatch, parseDetails } from '../src/gmp/ipowatch.js';
+import { parse as parseIpoJi, parseDetails as parseIpoJiDetails } from '../src/gmp/ipoji.js';
+import { mergeBySlug } from '../src/gmp/index.js';
 import { nameTokens, matchScore, bestMatch } from '../src/lib/ipoMatch.js';
 import { nseDate, normalizeCategory, parseSubscription } from '../src/market/nse.js';
 
@@ -239,6 +241,94 @@ test('ipowatch.parse splits boards, avoids the Last-Updated/Date collision', () 
 
   const amt = recs.find((r) => r.slug === 'amtech-esters');
   assert.equal(amt.board, 'sme', 'row after the SME heading must be tagged sme');
+});
+
+test('ipoji.parse reads the data attributes and full offer dates', () => {
+  const html = `
+    <tr class="gmp-row" data-type="sme" data-status="open" data-hasgmp="true"
+        data-gmp="42" data-pct="33" data-indicative="169"
+        data-name="Qualiance International" data-rowurl="/ipo-gmp/qualiance-international-ipo">
+      <td class="gmp-col-name" data-label="IPO"><a href="/ipo/qualiance-international-ipo">Qualiance International IPO</a></td>
+      <td class="gmp-num" data-label="Price Band">&#8377;120-127</td>
+      <td class="gmp-num" data-label="GMP">+&#8377;42</td>
+      <td class="gmp-secondary" data-label="Open &#8211; Close"><span class="gmp-dates">Sep 4, 2026 &#8211; Sep 8, 2026</span></td>
+      <td class="gmp-secondary" data-label="Last Updated">6 Sep 2026, 7:30 PM IST</td>
+    </tr>
+    <tr class="gmp-row" data-type="mainboard" data-status="upcoming" data-hasgmp="false"
+        data-gmp="0" data-pct="0" data-indicative="0" data-name="Manika Plastech">
+      <td data-label="Price Band">&#8377;-</td>
+      <td data-label="Open &#8211; Close">Sep 11, 2026 &#8211; Sep 16, 2026</td>
+    </tr>`;
+
+  const [q, m] = parseIpoJi(html);
+  assert.equal(q.slug, 'qualiance-international');
+  assert.equal(q.board, 'sme');
+  assert.equal(q.gmp, 42);
+  assert.equal(q.estGainPct, 33);
+  assert.equal(q.estListingPrice, 169);
+  assert.equal(q.status, 'open');
+  // Full dates, so unlike IPO Watch's "28-1 Sept" there is no year to infer.
+  assert.equal(q.openDate, '2026-09-04');
+  assert.equal(q.closeDate, '2026-09-08');
+  assert.equal(q.sourceUpdatedAt, '6 Sep 2026, 7:30 PM IST');
+
+  // Not yet quoted is not a premium of zero, even though the attributes read 0.
+  assert.equal(m.gmp, null);
+  assert.equal(m.estListingPrice, null);
+  assert.equal(m.openDate, '2026-09-11');
+});
+
+test('ipoji.parseDetails prefers the fact list and falls back to the timeline', () => {
+  const html = `
+    <dl class="fact-item"><dt class="fact-label"><i></i> Issue size</dt><dd class="fact-value">&#8377;45.11 Cr</dd></dl>
+    <dl class="fact-item"><dt class="fact-label"><i></i> Lot size</dt><dd class="fact-value">1000</dd></dl>
+    <dl class="fact-item"><dt class="fact-label"><i></i> Minimum Investment</dt><dd class="fact-value">&#8377;2,54,000</dd></dl>
+    <dl class="fact-item"><dt class="fact-label"><i></i> Listing At</dt><dd class="fact-value">NSE SME</dd></dl>
+    <li class="step"><p class="step-date done-label">Sep 9, 2026</p><p class="step-label done-label">Allotment Date</p></li>
+    <li class="step"><p class="step-date done-label">Sep 11, 2026</p><p class="step-label done-label">Listing Date</p></li>`;
+
+  const d = parseIpoJiDetails(html);
+  // A rupee amount as published, never a share count.
+  assert.equal(d.issueSize, '₹45.11 Cr');
+  assert.equal(d.lotSize, 1000);
+  assert.equal(d.minInvestment, 254000);
+  assert.equal(d.listingExchanges, 'NSE SME');
+  // Absent from the fact list here, so these come from the timeline.
+  assert.equal(d.allotmentDate, '2026-09-09');
+  assert.equal(d.listingDate, '2026-09-11');
+
+  // The page's own em dash for "not published yet" must not become a value.
+  assert.equal(
+    parseIpoJiDetails('<dl class="fact-item"><dt class="fact-label">Minimum Investment</dt><dd class="fact-value">—</dd></dl>')
+      .minInvestment,
+    null
+  );
+});
+
+test('mergeBySlug collapses per-source rows without mixing one quote with another', () => {
+  const rows = [
+    { slug: 'acme', source: 'ipowatch', gmp: 55, estListingPrice: 200, priceBand: '₹140-145', lotSize: 100 },
+    { slug: 'acme', source: 'ipoji', gmp: 40, estListingPrice: 185, priceBand: null, lotSize: null },
+    { slug: 'zeta', source: 'ipowatch', gmp: null, estListingPrice: null, priceBand: '₹90-95', lotSize: 50 },
+    { slug: 'zeta', source: 'ipoji', gmp: 12, estListingPrice: 107, priceBand: null, lotSize: null },
+  ];
+
+  const [acme, zeta] = mergeBySlug(rows);
+  assert.equal(mergeBySlug(rows).length, 2, 'one row per IPO, not one per source');
+
+  // The configured leader wins outright, and its premium and indicative price
+  // travel together -- ₹40 with ₹200 is a number neither source published.
+  assert.equal(acme.source, 'ipoji');
+  assert.equal(acme.gmp, 40);
+  assert.equal(acme.estListingPrice, 185);
+  // Descriptive gaps are still filled from the other source.
+  assert.equal(acme.priceBand, '₹140-145');
+  assert.equal(acme.lotSize, 100);
+
+  // A leader with no quote at all does not outrank one that has an answer.
+  assert.equal(zeta.source, 'ipoji');
+  assert.equal(zeta.gmp, 12);
+  assert.equal(zeta.priceBand, '₹90-95');
 });
 
 test('ipoMatch links names that differ across sources, without false positives', () => {
