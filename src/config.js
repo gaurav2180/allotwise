@@ -97,5 +97,17 @@ export const config = {
 };
 
 if (isProd && !config.panHashSecret) {
-  throw new Error('PAN_HASH_SECRET must be set in production');
+  // Say what the process can actually see. "Must be set" is true but useless
+  // when it *was* set — on another service, in another environment, or after
+  // the deploy that is running. Names only: never log a secret's value.
+  const seen = Object.keys(process.env)
+    .filter((k) => /^(PAN_|DB_PATH|TRUST_PROXY|SCHEDULER_|NODE_ENV|PORT|RAILWAY_)/.test(k))
+    .sort();
+
+  throw new Error(
+    'PAN_HASH_SECRET must be set in production.\n' +
+      `  Config-related variables visible to this process: ${seen.length ? seen.join(', ') : '(none)'}\n` +
+      '  If PAN_HASH_SECRET is missing from that list, it was set on a different service or\n' +
+      '  environment, or this deploy predates it — variables apply to deploys created after them.'
+  );
 }
