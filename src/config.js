@@ -100,14 +100,26 @@ if (isProd && !config.panHashSecret) {
   // Say what the process can actually see. "Must be set" is true but useless
   // when it *was* set — on another service, in another environment, or after
   // the deploy that is running. Names only: never log a secret's value.
-  const seen = Object.keys(process.env)
-    .filter((k) => /^(PAN_|DB_PATH|TRUST_PROXY|SCHEDULER_|NODE_ENV|PORT|RAILWAY_)/.test(k))
+  // App variables only: the platform's own RAILWAY_*/NODE_ENV/PORT are always
+  // present and drown out the answer.
+  const appVars = Object.keys(process.env)
+    .filter((k) => /^(PAN_|DB_PATH|TRUST_PROXY|SCHEDULER_|KFINTECH_|LINKINTIME_|BIGSHARE_|GMP_|NSE_|CACHE_|RL_)/.test(k))
     .sort();
+
+  // Naming the service and environment removes the guesswork about *where* the
+  // variable needs to go. Neither is a secret; both are set by the platform.
+  const where = [
+    process.env.RAILWAY_SERVICE_NAME && `service "${process.env.RAILWAY_SERVICE_NAME}"`,
+    process.env.RAILWAY_ENVIRONMENT_NAME && `environment "${process.env.RAILWAY_ENVIRONMENT_NAME}"`,
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   throw new Error(
     'PAN_HASH_SECRET must be set in production.\n' +
-      `  Config-related variables visible to this process: ${seen.length ? seen.join(', ') : '(none)'}\n` +
-      '  If PAN_HASH_SECRET is missing from that list, it was set on a different service or\n' +
-      '  environment, or this deploy predates it — variables apply to deploys created after them.'
+      (where ? `  This process is running in ${where}.\n` : '') +
+      `  App variables it can see: ${appVars.length ? appVars.join(', ') : '(none — no app variables reached this service)'}\n` +
+      '  Set PAN_HASH_SECRET on exactly that service and environment. Variables set on a\n' +
+      '  different service, or in a different environment, are not visible here.'
   );
 }
