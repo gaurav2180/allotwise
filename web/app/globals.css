@@ -1,0 +1,397 @@
+@import "tailwindcss";
+
+/* Dark mode is driven by next-themes, which sets class="dark" on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ============================================================================
+   LAYER 1 — PRIMITIVES
+   Raw values. Named for what they are, not what they do.
+   Components must never reference these directly.
+   ============================================================================ */
+:root {
+  /* Neutrals — light */
+  --ink-50: #f5f5f3;
+  --ink-0: #ffffff;
+  --ink-200: #e0e0da;
+  --ink-500: #6b6b72;
+  --ink-900: #15151a;
+
+  /* Neutrals — dark */
+  --night-900: #0e0e11;
+  --night-800: #17171b;
+  --night-700: #28282e;
+  --night-400: #94949c;
+  --night-50: #f0f0ee;
+
+  /* Accent — ink blue. Focus and active state only. */
+  --blue-600: #1b3deb;
+  --blue-300: #6b87ff;
+
+  /* Data states — not accents */
+  --green-700: #0b7a4b;
+  --green-400: #3bb77e;
+  --red-700: #b23a2f;
+  --red-400: #e0705f;
+
+  /* Highlight — deep market gold. Marketing pages only (/, /terms, /privacy,
+     /disclaimer), used sparingly: never a background wash. Light value is
+     darkened off the requested #9C6B12 to clear 4.5:1 against --bg. */
+  --gold-700: #8a5a10;
+  --gold-400: #d9a441;
+
+  /* Hairline that keeps a white button off an off-white page */
+  --hairline-light: rgb(21 21 26 / 0.2);
+}
+
+/* ============================================================================
+   LAYER 2 — SEMANTIC
+   Purpose aliases. This is the layer that flips between themes.
+   ============================================================================ */
+:root {
+  --bg: var(--ink-50);
+  --surface: var(--ink-0);
+  --text: var(--ink-900);
+  --dim: var(--ink-500);
+  --border: var(--ink-200);
+
+  --accent: var(--blue-600);
+  --positive: var(--green-700);
+  --negative: var(--red-700);
+  --highlight: var(--gold-700);
+
+  /* Tint fills, derived from the same hues so they cannot drift */
+  --positive-soft: rgb(11 122 75 / 0.1);
+  --negative-soft: rgb(178 58 47 / 0.1);
+  --accent-soft: rgb(27 61 235 / 0.08);
+
+  color-scheme: light;
+}
+
+.dark {
+  --bg: var(--night-900);
+  --surface: var(--night-800);
+  --text: var(--night-50);
+  --dim: var(--night-400);
+  --border: var(--night-700);
+
+  --accent: var(--blue-300);
+  --positive: var(--green-400);
+  --negative: var(--red-400);
+  --highlight: var(--gold-400);
+
+  --positive-soft: rgb(59 183 126 / 0.14);
+  --negative-soft: rgb(224 112 95 / 0.14);
+  --accent-soft: rgb(107 135 255 / 0.14);
+
+  color-scheme: dark;
+}
+
+/* ============================================================================
+   LAYER 3 — COMPONENT
+   Component-specific tokens. Only these appear in component CSS.
+   ============================================================================ */
+:root {
+  /* Button + logo mark: white background, black text, hairline in light only */
+  --btn-bg: var(--ink-0);
+  --btn-text: var(--ink-900);
+  --btn-border: var(--hairline-light);
+
+  --row-bg: var(--surface);
+  --row-bg-hover: color-mix(in oklab, var(--surface) 94%, var(--text));
+  --row-border: var(--border);
+
+  --chip-bg: color-mix(in oklab, var(--surface) 92%, var(--text));
+  --chip-text: var(--dim);
+
+  --field-bg: var(--surface);
+  --field-border: var(--border);
+  --field-border-focus: var(--accent);
+  --field-placeholder: var(--dim);
+
+  --skeleton-base: color-mix(in oklab, var(--surface) 90%, var(--text));
+
+  --focus-ring: var(--accent);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+}
+
+.dark {
+  /* Dark mode drops the button hairline */
+  --btn-bg: var(--night-50);
+  --btn-text: var(--night-900);
+  --btn-border: transparent;
+
+  --row-bg-hover: color-mix(in oklab, var(--surface) 92%, var(--text));
+}
+
+/* ============================================================================
+   MOTION — transitions.dev values, unchanged.
+   Each token exists for one job; see DESIGN.md.
+   ============================================================================ */
+:root {
+  --ease-slide: cubic-bezier(0.22, 1, 0.36, 1); /* tabs */
+  --ease-pop: cubic-bezier(0.34, 1.45, 0.64, 1); /* number pop-in */
+  /* Gentler deceleration than ease-slide, for a taller reveal (the accordion's
+     content varies from a few lines to a full detail panel) — a curve tuned
+     for a small tab-width move read as an abrupt snap at that height. */
+  --ease-reveal: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --dur-tab: 250ms;
+  --dur-accordion: 300ms;
+  --dur-pop: 500ms;
+  --dur-skeleton-pulse: 1000ms;
+  --dur-skeleton-fade: 400ms;
+  /* IPOs <-> PANs is the app's core tab switch, not a page load — a broker
+     terminal doesn't crossfade when you change books. Fast enough to read as
+     instant, just softening the hard cut of the outgoing DOM being replaced. */
+  --dur-page-nav: 120ms;
+  /* Landing page only — a whole section settling into view reads better
+     slower than a component-level transition, hence its own duration
+     alongside the accordion's --ease-reveal rather than a new curve. */
+  --dur-reveal: 700ms;
+
+  --pop-distance: 8px;
+  --reveal-distance: 20px;
+  --stagger-number: 70ms; /* between digits/figures in one result */
+  --stagger-pan: 260ms; /* between PAN result rows */
+  --skeleton-blur: 2px;
+}
+
+/* ============================================================================
+   TAILWIND THEME
+   `inline` so utilities resolve the live variable and follow the theme flip.
+   ============================================================================ */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-text: var(--text);
+  --color-dim: var(--dim);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
+
+  --color-btn: var(--btn-bg);
+  --color-btn-text: var(--btn-text);
+  --color-row-hover: var(--row-bg-hover);
+  --color-chip: var(--chip-bg);
+  --color-skeleton: var(--skeleton-base);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, "SFMono-Regular", monospace;
+
+  /* Shape rule, enforced at the tooling level: clearing the default radius
+     scale deletes rounded-sm/md/lg/xl/2xl/3xl as utilities, so only these
+     three shapes can be expressed at all. */
+  --radius-*: initial;
+  --radius-card: 12px;
+  --radius-control: 10px;
+  --radius-pill: 9999px;
+
+  --ease-slide: var(--ease-slide);
+  --ease-pop: var(--ease-pop);
+}
+
+/* ============================================================================
+   BASE
+   ============================================================================ */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Every number in this product carries tabular figures so columns line up
+     vertically when scanning a list of IPOs. Geist ships the `tnum` OpenType
+     feature, so tabular alignment holds without switching to a mono face.
+     Medium weight by default: these are figures people are scanning for
+     (price, GMP, subs), and regular weight read as too light next to the
+     full-colour label text beside them. Call sites showing genuinely
+     secondary numeric text (a masked PAN, a historical annotation) override
+     back to font-normal explicitly. */
+  .num {
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    font-weight: 500;
+  }
+
+  /* Actual code-like content (none shipped yet, but kept correct) stays on a
+     real monospace face — unlike `.num`, this is not about numbers. */
+  code,
+  kbd,
+  samp {
+    font-family: var(--font-jetbrains), ui-monospace, "SFMono-Regular", monospace;
+  }
+
+  /* Visible focus everywhere, accent-coloured, never removed. */
+  :focus-visible {
+    outline: var(--focus-ring-width) solid var(--focus-ring);
+    outline-offset: var(--focus-ring-offset);
+    border-radius: 2px;
+  }
+
+  ::selection {
+    background: var(--accent-soft);
+  }
+}
+
+/* ============================================================================
+   MOTION PRIMITIVES
+   Bounded. No infinite loops except the skeleton pulse, which is itself the
+   loading affordance.
+   ============================================================================ */
+@layer utilities {
+  @keyframes aw-pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--pop-distance));
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes aw-skeleton-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes aw-fade-in {
+    from {
+      opacity: 0;
+      filter: blur(var(--skeleton-blur));
+    }
+    to {
+      opacity: 1;
+      filter: blur(0);
+    }
+  }
+
+  @keyframes aw-page-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  /* A single expanding, fading ring — the moment a PAN is saved. Bounded to
+     one run, not a loop, so it reads as a confirmation, not a decoration. */
+  @keyframes aw-ripple {
+    from {
+      opacity: 0.5;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.8);
+    }
+  }
+
+  /* 6px/4px at 80/60/80/60ms — invalid PAN */
+  @keyframes aw-shake {
+    0% {
+      transform: translateX(0);
+    }
+    20% {
+      transform: translateX(-6px);
+    }
+    45% {
+      transform: translateX(4px);
+    }
+    70% {
+      transform: translateX(-6px);
+    }
+    100% {
+      transform: translateX(0);
+    }
+  }
+
+  .aw-pop-in {
+    animation: aw-pop-in var(--dur-pop) var(--ease-pop) both;
+  }
+
+  .aw-fade-in {
+    animation: aw-fade-in var(--dur-skeleton-fade) var(--ease-slide) both;
+  }
+
+  /* App-shell tab switch (components/page-transition.tsx) — opacity only, no
+     blur, and a fraction of aw-fade-in's duration. That animation is tuned
+     for a skeleton resolving into data, which reads as "settling in"; played
+     on every IPOs<->PANs click it reads as the switch itself being slow. */
+  .aw-page-fade-in {
+    animation: aw-page-fade-in var(--dur-page-nav) var(--ease-slide) both;
+  }
+
+  .aw-skeleton {
+    background-color: var(--skeleton-base);
+    animation: aw-skeleton-pulse var(--dur-skeleton-pulse) ease-in-out infinite;
+  }
+
+  .aw-shake {
+    animation: aw-shake 280ms var(--ease-slide) both;
+  }
+
+  .aw-ripple {
+    animation: aw-ripple 700ms var(--ease-slide) both;
+  }
+
+  /* Landing-page scroll reveal (components/landing/reveal.tsx). A transition
+     rather than a keyframe animation, since it has two endpoints driven by
+     React state (not-yet-visible / visible) instead of a fixed run. */
+  .aw-reveal {
+    opacity: 0;
+    transform: translateY(var(--reveal-distance));
+    transition:
+      opacity var(--dur-reveal) var(--ease-reveal),
+      transform var(--dur-reveal) var(--ease-reveal);
+  }
+
+  .aw-reveal-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Expand/collapse is no longer this CSS-only grid-rows technique — animating
+     grid-template-rows forces a full grid track-sizing recalculation every
+     frame, which read as janky on mobile WebKit regardless of easing. It's
+     now a measured pixel `height` transition driven by
+     hooks/use-accordion-height.ts (inline styles, so it can also keep the
+     height in sync via ResizeObserver while open — something a CSS-only rule
+     can't do). --dur-accordion and --ease-reveal above are still what it
+     uses, just applied inline rather than through a class. */
+}
+
+/* One guard, applied globally, rather than per-component opt-outs. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

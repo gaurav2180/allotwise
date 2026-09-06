@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------
+# Dependencies / build output
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# ---------------------------------------------------------------------------
+# Secrets
+#
+# .env holds PAN_HASH_SECRET, which keys the HMAC used for cache and rate-limit
+# lookups. .env.example is committed deliberately — it carries placeholders
+# only, and is the documentation for what must be set.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ---------------------------------------------------------------------------
+# Runtime data — none of this belongs in version control.
+#
+# data/*.db          the SQLite database
+# web/data/*.jsonl   the waitlist, which is a file of real email addresses
+#
+# Directory *contents* are ignored rather than named extensions, so a new
+# artifact dropped in either one is excluded by default instead of being
+# committed the first time someone forgets.
+#
+# Note `data/*` and not `data/` — Git cannot re-include a file whose parent
+# directory is excluded, so the `.gitkeep` negation below only works against
+# the contents form. The .gitkeep files keep the directories present after a
+# clone, since the app writes into them at runtime.
+# ---------------------------------------------------------------------------
+data/*
+!data/.gitkeep
+web/data/*
+!web/data/.gitkeep
+
+# ---------------------------------------------------------------------------
+# Logs and local scratch
+# ---------------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+*.bak
+*.tmp
+coverage/
+
+# ---------------------------------------------------------------------------
+# Agent / tooling state — local scratch, not project code
+# ---------------------------------------------------------------------------
+.claude/
+
+# ---------------------------------------------------------------------------
+# Editor / OS
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.vercel

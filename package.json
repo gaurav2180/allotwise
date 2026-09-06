@@ -1,0 +1,30 @@
+{
+  "name": "allotwise",
+  "version": "0.1.0",
+  "private": true,
+  "description": "IPO allotment-status checker backend (KFintech + Link Intime/MUFG)",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning src/server.js",
+    "dev": "node --no-warnings=ExperimentalWarning --watch src/server.js",
+    "migrate": "node --no-warnings=ExperimentalWarning src/db/migrate.js",
+    "sync:kfintech": "node --no-warnings=ExperimentalWarning scripts/sync-kfintech.js",
+    "sync:linkintime": "node --no-warnings=ExperimentalWarning scripts/sync-linkintime.js",
+    "sync:bigshare": "node --no-warnings=ExperimentalWarning scripts/sync-bigshare.js",
+    "sync:gmp": "node --no-warnings=ExperimentalWarning scripts/sync-gmp.js",
+    "sync:meta": "node --no-warnings=ExperimentalWarning scripts/sync-metadata.js",
+    "sync:subscription": "node --no-warnings=ExperimentalWarning scripts/sync-subscription.js",
+    "link:ipos": "node --no-warnings=ExperimentalWarning scripts/link-ipos.js",
+    "sync": "npm run sync:kfintech && npm run sync:linkintime && npm run sync:bigshare && npm run sync:gmp && npm run sync:meta && npm run sync:subscription && npm run link:ipos",
+    "scheduler": "node --no-warnings=ExperimentalWarning scripts/scheduler.js",
+    "test": "node --no-warnings=ExperimentalWarning --test test/smoke.mjs"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.4.1"
+  }
+}
