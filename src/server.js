@@ -6,7 +6,13 @@ import { logger } from './lib/logger.js';
 
 getDb();
 
-const server = createApp().listen(config.port, () => {
+// Bind `::` explicitly rather than leaving the host to Node's default. Railway's
+// private network is IPv6-only, so a service reachable at
+// `<name>.railway.internal` must be listening on the IPv6 wildcard; `::` is
+// dual-stack here (Node does not set IPV6_V6ONLY), so public IPv4 traffic still
+// arrives. Relying on the default works only while IPv6 happens to be available
+// at startup, which is exactly the thing that fails silently.
+const server = createApp().listen(config.port, '::', () => {
   logger.info('allotwise listening', { port: config.port, env: process.env.NODE_ENV ?? 'development' });
 });
 

@@ -67,6 +67,31 @@ export async function backendGet<T = unknown>(
     return { ok: true, data: body as T };
   } catch (err) {
     const aborted = err instanceof Error && err.name === "AbortError";
+    if (!aborted) {
+      // The caller only ever sees "could not reach", which is the right thing to
+      // show a user and useless to operate on: DNS failure, refused connection
+      // and wrong port all look identical. undici keeps the real errno on
+      // `cause`, so record that. Path only — never the query string, which is
+      // where a PAN would be.
+      const cause = (err as { cause?: { code?: string; message?: string } }).cause;
+      console.warn(
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          scope: "backend",
+          msg: "request failed",
+          path: path.split("?")[0],
+          host: (() => {
+            try {
+              return new URL(BACKEND_URL).host;
+            } catch {
+              return "invalid BACKEND_URL";
+            }
+          })(),
+          code: cause?.code ?? null,
+          message: cause?.message ?? (err as Error).message,
+        })
+      );
+    }
     return {
       ok: false,
       status: aborted ? 504 : 502,
