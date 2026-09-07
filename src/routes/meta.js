@@ -3,10 +3,11 @@ import { listIpos, getDb } from '../db/index.js';
 import { supportedRegistrars } from '../registrars/index.js';
 import { cacheStats } from '../lib/cache.js';
 import { rateLimitStats } from '../lib/rateLimit.js';
+import { config } from '../config.js';
 
 export const metaRouter = Router();
 
-metaRouter.get('/health', (_req, res) => {
+metaRouter.get('/health', (req, res) => {
   let dbOk = true;
   try {
     getDb().prepare('SELECT 1').get();
@@ -18,6 +19,15 @@ metaRouter.get('/health', (_req, res) => {
     uptimeSeconds: Math.round(process.uptime()),
     cache: cacheStats(),
     rateLimit: rateLimitStats(),
+    // Whether the forwarded-address hardening is actually live. A variable set
+    // in the dashboard and a variable present in the running process are not
+    // the same thing, and the difference is invisible from outside -- the
+    // limits simply stop working. Booleans and a hop count only: never the
+    // secret, and never the address of whoever is asking.
+    proxyTrust: {
+      sharedSecret: Boolean(config.proxySecret),
+      trustProxy: req.app.get('trust proxy'),
+    },
   });
 });
 
