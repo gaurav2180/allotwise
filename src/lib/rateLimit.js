@@ -1,15 +1,20 @@
 import rateLimit from 'express-rate-limit';
 import { config } from '../config.js';
 import { ipKey } from './ipKey.js';
+import { clientIp } from './clientIp.js';
 import { AppError } from './errors.js';
 
 const handler = (req, res, next) =>
   next(new AppError(429, 'RATE_LIMITED', 'Too many requests. Please slow down.'));
 
+// express-rate-limit keys on req.ip by default. Every limiter here goes through
+// clientIp instead, so a forwarded address counts only when the caller proved it
+// is our frontend -- otherwise the budgets belong to whoever opened the socket.
 const base = {
   standardHeaders: 'draft-7',
   legacyHeaders: false,
   handler,
+  keyGenerator: (req) => ipKey(clientIp(req)),
 };
 
 export const globalLimiter = rateLimit({
@@ -51,7 +56,7 @@ export function distinctPanGuard(req, _res, next) {
   const now = Date.now();
   if (seen.size > 50_000) sweep(now);
 
-  const key = ipKey(req.ip);
+  const key = ipKey(clientIp(req));
   let entry = seen.get(key);
   if (!entry || entry.resetAt <= now) {
     entry = { pans: new Set(), resetAt: now + config.rateLimit.distinctPanWindowMs };

@@ -6,6 +6,8 @@ import { createApp } from '../src/app.js';
 import { slugify, parsePan, parseSlug } from '../src/lib/validate.js';
 import { maskPan, logger } from '../src/lib/logger.js';
 import { ipKey } from '../src/lib/ipKey.js';
+import { clientIp, isTrustedProxy } from '../src/lib/clientIp.js';
+import { config } from '../src/config.js';
 import { cacheGet, cacheSet, cacheClear } from '../src/lib/cache.js';
 import { normalizeRecords } from '../src/registrars/kfintech.js';
 import { normalizeRecords as normalizeLinkintime, parseTables } from '../src/registrars/linkintime.js';
@@ -407,6 +409,55 @@ test('nse helpers parse dates, categories, and the subscription payload', () => 
   assert.equal(rows[1].category, 'Total');
   assert.equal(rows[1].timesSubscribed, 42.61);
   assert.equal(updateTime, 'Updated as on 03-Sep-2026 19:00:00');
+});
+
+test('x-forwarded-for is only believed from the frontend proxy', async (t) => {
+  const original = config.proxySecret;
+  t.after(() => {
+    config.proxySecret = original;
+  });
+
+  const req = (headers) => ({
+    ip: '203.0.113.9',
+    get: (name) => headers[name.toLowerCase()],
+  });
+
+  // No secret configured: behaviour is the old one -- Express has already
+  // resolved req.ip from the trusted hop count, and it is used as-is.
+  config.proxySecret = undefined;
+  assert.equal(clientIp(req({ 'x-forwarded-for': '198.51.100.4' })), '203.0.113.9');
+
+  config.proxySecret = 'shared-secret';
+
+  // The frontend proves itself, so the address it forwards is the real client.
+  assert.equal(
+    clientIp(req({ 'x-forwarded-for': '198.51.100.4', 'x-allotwise-proxy': 'shared-secret' })),
+    '198.51.100.4'
+  );
+  // Leftmost entry is the original client; the rest are proxies it passed through.
+  assert.equal(
+    clientIp(req({ 'x-forwarded-for': '198.51.100.4, 10.0.0.1', 'x-allotwise-proxy': 'shared-secret' })),
+    '198.51.100.4'
+  );
+
+  // The attack this exists to stop: a caller reaching the backend directly and
+  // asserting a fresh address per request to reset its per-IP budget. Without
+  // the secret the header is ignored entirely and every request keys on the
+  // socket address, so the budget follows them.
+  for (const spoofed of ['198.51.100.4', '198.51.100.5', '198.51.100.6']) {
+    assert.equal(clientIp(req({ 'x-forwarded-for': spoofed })), '203.0.113.9');
+  }
+  // A wrong or partial secret is no better than none.
+  assert.equal(
+    clientIp(req({ 'x-forwarded-for': '198.51.100.4', 'x-allotwise-proxy': 'shared-secre' })),
+    '203.0.113.9'
+  );
+  assert.equal(
+    clientIp(req({ 'x-forwarded-for': '198.51.100.4', 'x-allotwise-proxy': 'wrong-secret!' })),
+    '203.0.113.9'
+  );
+  assert.equal(isTrustedProxy(req({ 'x-allotwise-proxy': 'shared-secret' })), true);
+  assert.equal(isTrustedProxy(req({})), false);
 });
 
 test('rejects bad requests before contacting the registrar', async () => {

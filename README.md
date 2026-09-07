@@ -151,8 +151,18 @@ Outbound, a semaphore (`KFINTECH_MAX_CONCURRENCY`, default 4) prevents a burst
 of user requests fanning out into a burst against the registrar, with
 exponential backoff on 429/5xx — mirroring what their own frontend does.
 
-Behind a proxy, set `TRUST_PROXY_HOPS` to the number of trusted hops or every
-caller shares one bucket.
+**All of that keys on the caller's address, so the address has to be real.**
+`X-Forwarded-For` is a claim by whoever connected, and trusting it by hop count
+(`TRUST_PROXY_HOPS`) is sound only while every request arrives through our own
+proxy. Set `PROXY_SHARED_SECRET` to the same value on the backend and the
+frontend and the header is honoured only from a caller presenting it
+(`src/lib/clientIp.js`); everything else is keyed on the socket address, which
+cannot be forged. Without it, anything that can reach the backend directly walks
+past every per-IP budget — including the distinct-PAN guard — by changing one
+header per request.
+
+`TRUST_PROXY_HOPS` remains the fallback when no shared secret is configured, and
+is ignored when one is.
 
 ## Registrars
 

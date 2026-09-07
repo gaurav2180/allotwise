@@ -45,16 +45,21 @@ function stateLine(ipo: IpoListItem): string {
   if (ipo.allotment.available) return "Allotment out";
 
   // Derived from dates, not the scraped status, which goes stale overnight.
+  // "Today" carries no date alongside it — it would just repeat the date the
+  // reader is already looking at it on. Anything else pairs the relative word
+  // with the actual date, since "in 2d" alone means checking a calendar.
   switch (derivePhase(ipo)) {
     case "open": {
       const rel = relativeDay(ipo.closeDate);
       if (rel === "today") return "Closes today";
-      return rel ? `Closes ${rel}` : ipo.closeDate ? `Open until ${formatDate(ipo.closeDate)}` : "Open now";
+      if (rel) return `Closes ${rel} (${formatDate(ipo.closeDate)})`;
+      return ipo.closeDate ? `Open until ${formatDate(ipo.closeDate)}` : "Open now";
     }
     case "upcoming": {
       const rel = relativeDay(ipo.openDate);
       if (rel === "today") return "Opens today";
-      return rel ? `Opens ${rel}` : ipo.openDate ? `Opens ${formatDate(ipo.openDate)}` : "Upcoming";
+      if (rel) return `Opens ${rel} (${formatDate(ipo.openDate)})`;
+      return ipo.openDate ? `Opens ${formatDate(ipo.openDate)}` : "Upcoming";
     }
     default:
       return "Closed — allotment pending";

@@ -13,6 +13,9 @@ import "server-only";
  */
 export const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:3000";
 
+/** Shared with the backend; identifies this proxy so its x-forwarded-for is believed. */
+const PROXY_SECRET = process.env.PROXY_SHARED_SECRET;
+
 export type BackendResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; code: string; message: string };
@@ -40,9 +43,14 @@ export async function backendGet<T = unknown>(
         accept: "application/json",
         ...(json === undefined ? {} : { "content-type": "application/json" }),
         // Preserve the caller's IP so the backend's per-IP rate limits apply to
-        // the real user rather than to this server. Requires TRUST_PROXY_HOPS
-        // to be set on the backend in a deployed environment.
+        // the real user rather than to this server.
         ...(forwardedFor ? { "x-forwarded-for": forwardedFor } : {}),
+        // Proof that the forwarded address above came from this proxy. The
+        // backend ignores x-forwarded-for without it, so a caller reaching the
+        // backend directly cannot invent an address per request and walk
+        // through the per-IP budgets. Optional: unset, the backend falls back
+        // to trusting a fixed number of proxy hops.
+        ...(PROXY_SECRET ? { "x-allotwise-proxy": PROXY_SECRET } : {}),
       },
     });
 

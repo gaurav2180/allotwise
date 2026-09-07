@@ -3,15 +3,20 @@ import { allotmentRouter } from './routes/allotment.js';
 import { metaRouter } from './routes/meta.js';
 import { marketRouter } from './routes/market.js';
 import { globalLimiter } from './lib/rateLimit.js';
+import { config } from './config.js';
 import { AppError } from './lib/errors.js';
 import { logger } from './lib/logger.js';
 
 export function createApp() {
   const app = express();
 
-  // Behind a proxy/load balancer this must be accurate or every caller shares
-  // one rate-limit bucket. Set to the number of trusted hops in production.
-  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS ?? 0));
+  // With a shared secret configured, `req.ip` is pinned to the socket address
+  // and the forwarded chain is read only for callers that prove they are our
+  // frontend (lib/clientIp.js). Trusting hops as well would reintroduce exactly
+  // the spoofing that protects against: a direct caller could still assert any
+  // address it liked. Without a secret, the hop count is honoured as before so
+  // existing deployments and local development are unaffected.
+  app.set('trust proxy', config.proxySecret ? false : Number(process.env.TRUST_PROXY_HOPS ?? 0));
   app.disable('x-powered-by');
 
   // Express 4 parses query strings with `qs`, which carries a moderate DoS and

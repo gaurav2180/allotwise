@@ -57,7 +57,7 @@ const BOARDS: { value: BoardFilter; label: string }[] = [
 ];
 
 export function IpoList() {
-  const [filter, setFilter] = useState<Filter>("ongoing");
+  const [filter, setFilter] = useState<Filter>("allotted");
   const [board, setBoard] = useState<BoardFilter>("all");
   // Lifted here rather than kept local to IpoRow, so opening one row can
   // close whichever other one was open — only one detail panel expanded
@@ -90,15 +90,15 @@ export function IpoList() {
     return c;
   }, [scoped]);
 
-  // Land on a tab that actually has something. Ongoing is what most visits are
-  // for — issues currently in play — so it comes first; allotted is still a
-  // reasonable fallback since checking a result is the other common reason to
-  // open the app. Runs once, so the tab never moves under the user afterwards.
+  // Land on a tab that actually has something. Allotted comes first and is
+  // the default — checking a result is the reason most visits happen — with
+  // ongoing and upcoming as fallbacks. Runs once, so the tab never moves under
+  // the user afterwards.
   useEffect(() => {
     if (chosen.current || !query.data) return;
     chosen.current = true;
-    const first = (["ongoing", "allotted", "upcoming"] as const).find((b) => counts[b] > 0);
-    if (first && first !== "ongoing") setFilter(first);
+    const first = (["allotted", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
+    if (first && first !== "allotted") setFilter(first);
   }, [query.data, counts]);
 
   const rows = useMemo(() => {
@@ -108,6 +108,16 @@ export function IpoList() {
     const list = isSearching
       ? scoped.filter((r) => r.name.toLowerCase().includes(q))
       : scoped.filter((r) => bucketOf(r) === filter);
+
+    // Allotted issues are resolved, so ranking them by GMP — a forecast for
+    // an outcome that already happened — isn't a useful order. Most recently
+    // closed first instead: that's the result someone opening this tab is
+    // actually here to check. (No allotment date exists at the list level
+    // without an N+1 fetch per row, but close date tracks it closely enough.)
+    if (!isSearching && filter === "allotted") {
+      return [...list].sort((a, b) => (b.closeDate ?? "").localeCompare(a.closeDate ?? ""));
+    }
+
     // Highest premium first within a bucket — the rows worth looking at.
     return [...list].sort((a, b) => (b.gmp ?? 0) - (a.gmp ?? 0));
   }, [scoped, filter, isSearching, q]);
@@ -123,9 +133,9 @@ export function IpoList() {
   // a scrolled-down page meant scrolling back up to reveal the tab strip.
   const tabs: TabOption<Filter>[] = useMemo(
     () => [
+      { value: "allotted", label: "Allotted", count: counts.allotted },
       { value: "ongoing", label: "Ongoing", count: counts.ongoing },
       { value: "upcoming", label: "Upcoming", count: counts.upcoming },
-      { value: "allotted", label: "Allotted", count: counts.allotted },
       // No count: the listing history is fetched only when this tab is opened.
       { value: "past", label: "Past" },
     ],
@@ -204,7 +214,7 @@ export function IpoList() {
           // real state, not a mistake, so send them to one that has issues in it.
           onReset={() => {
             setBoard("all");
-            const first = (["ongoing", "allotted", "upcoming"] as const).find((b) => counts[b] > 0);
+            const first = (["allotted", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
             if (first) setFilter(first);
           }}
         />

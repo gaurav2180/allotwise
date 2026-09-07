@@ -3,6 +3,7 @@ import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { clientIp } from "@/lib/backend";
+import { notifyWaitlistSignup } from "@/lib/mail";
 
 export const dynamic = "force-dynamic";
 
@@ -130,6 +131,9 @@ export async function POST(request: Request) {
     await mkdir(path.dirname(FILE), { recursive: true });
     await appendFile(FILE, `${JSON.stringify({ email, at: new Date().toISOString() })}\n`, "utf8");
     already.add(email);
+    // Fire-and-forget: the signup is already durably saved above, so a slow
+    // or failed email must not hold up or fail the response to the visitor.
+    void notifyWaitlistSignup(email);
   } catch {
     return NextResponse.json(
       { error: { code: "INTERNAL", message: "Could not save your address. Try again shortly." } },

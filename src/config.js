@@ -12,6 +12,11 @@ export const config = {
 
   panHashSecret: str(process.env.PAN_HASH_SECRET, isProd ? undefined : 'dev-insecure-secret'),
 
+  // Shared with the frontend so the backend can tell its own proxy from a direct
+  // caller, and only believe X-Forwarded-For from the former. Optional: unset,
+  // the older `trust proxy` hop count applies unchanged. See lib/clientIp.js.
+  proxySecret: str(process.env.PROXY_SHARED_SECRET, undefined),
+
   kfintech: {
     apiBase: str(
       process.env.KFINTECH_API_BASE,

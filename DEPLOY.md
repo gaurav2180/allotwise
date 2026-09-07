@@ -23,12 +23,19 @@ proxies onward. Leaving the backend private means the allotment endpoint is not
 publicly reachable at all, and Railway's internal DNS keeps the traffic off the
 internet. `web` reaches it at `backend.railway.internal`.
 
+Railway's CLI creates a domain rather than reporting one — `railway domain` with
+no argument generates one as a side effect — so it is worth checking the backend
+has none after any CLI work. This is defence in depth rather than the control:
+`PROXY_SHARED_SECRET` below means the rate limits hold even when the backend is
+reachable, which is the assumption that should not be load-bearing.
+
 ## Backend service — variables
 
 ```
 NODE_ENV=production
 PORT=3000
 PAN_HASH_SECRET=<paste a fresh 48-byte random string>
+PROXY_SHARED_SECRET=<a second fresh random string, same value on `web`>
 DB_PATH=/app/data/allotwise.db
 TRUST_PROXY_HOPS=1
 SCHEDULER_ENABLED=true
@@ -42,9 +49,18 @@ SCHEDULER_RUN_ON_START=true
   cached allotment result, which is safe — they are re-fetched.
 - **`PORT=3000` is pinned deliberately.** Railway would otherwise assign one,
   and `web` needs a predictable address for the private-network call.
-- **`TRUST_PROXY_HOPS=1`** — `web` forwards the real client IP as
-  `x-forwarded-for`. Without this, Express attributes every request to the
-  `web` service's IP and all users share one rate-limit bucket.
+- **`PROXY_SHARED_SECRET` is how the backend knows a request came from `web`.**
+  `x-forwarded-for` is a claim by whoever connected, not a fact. With this set,
+  the backend reads it only from a caller presenting the same secret and
+  otherwise keys every limit on the socket address — so a caller reaching the
+  backend directly cannot assert a fresh address per request and walk past the
+  per-IP budgets, including the distinct-PAN guard that exists to stop a bulk
+  crawl. Generate it the same way as `PAN_HASH_SECRET`, and set the identical
+  value on both services or the frontend's forwarded addresses are ignored (all
+  users then share one bucket — safe, but wrong).
+- **`TRUST_PROXY_HOPS=1`** — the fallback when no shared secret is set. It is
+  only sound while the backend is unreachable from the internet; with the secret
+  configured the app ignores hop counting entirely.
 - `DB_PATH` is absolute so it lands on the mounted volume rather than in the
   container's ephemeral filesystem, which is wiped on every deploy.
 
@@ -53,6 +69,7 @@ SCHEDULER_RUN_ON_START=true
 ```
 NODE_ENV=production
 BACKEND_URL=http://backend.railway.internal:3000
+PROXY_SHARED_SECRET=<the same value set on the backend>
 ```
 
 - `NODE_ENV=production` gates the CSP and HSTS headers in `next.config.ts`.
