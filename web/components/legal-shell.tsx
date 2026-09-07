@@ -1,24 +1,25 @@
 import Link from "next/link";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ContactButton } from "@/components/contact-button";
 import { LogoLockup } from "@/components/logo";
 
 const LEGAL_LINKS = [
   { href: "/terms", label: "Terms" },
   { href: "/privacy", label: "Privacy" },
   { href: "/disclaimer", label: "Disclaimer" },
+  { href: "/contact", label: "Contact" },
 ];
 
-/** Inline legal links, reused in the landing footer and the app-shell footer. */
+const LINK_CLASS =
+  "inline-flex min-h-11 items-center text-[12px] text-dim underline underline-offset-2 hover:text-text hover:no-underline sm:min-h-0";
+
+/** Inline legal links plus Contact, reused in the landing footer and the app-shell footer. */
 export function LegalLinks({ except }: { except?: string }) {
   const links = LEGAL_LINKS.filter((l) => l.href !== except);
   return (
     <nav aria-label="Legal" className="flex flex-wrap items-center gap-x-4 gap-y-2">
       {links.map((l) => (
-        <Link
-          key={l.href}
-          href={l.href}
-          className="inline-flex min-h-11 items-center text-[12px] text-dim underline underline-offset-2 hover:text-text hover:no-underline sm:min-h-0"
-        >
+        <Link key={l.href} href={l.href} className={LINK_CLASS}>
           {l.label}
         </Link>
       ))}
@@ -47,6 +48,7 @@ export function LegalShell({
             <LogoLockup />
           </Link>
           <div className="ml-auto flex items-center gap-2">
+            <ContactButton />
             <ThemeToggle />
             <Link
               href="/app"

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ContactButton } from "@/components/contact-button";
 import { IpoSearch } from "@/components/ipo-search";
 import { LogoLockup } from "@/components/logo";
 import { usePans } from "@/hooks/use-pans";
@@ -52,6 +53,7 @@ export function SiteHeader() {
 
         <div className="ml-auto flex items-center gap-1">
           <IpoSearch />
+          <ContactButton />
           <ThemeToggle />
         </div>
       </div>

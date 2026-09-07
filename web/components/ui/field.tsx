@@ -27,6 +27,30 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
 );
 Input.displayName = "Input";
 
+export interface TextareaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  invalid?: boolean;
+}
+
+export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
+  ({ className, invalid, ...props }, ref) => (
+    <textarea
+      ref={ref}
+      aria-invalid={invalid || undefined}
+      className={cn(
+        // Same treatment as Input (16px on mobile, resize disabled so it can't
+        // be dragged wider than the form column it lives in).
+        "w-full resize-y rounded-control border bg-surface px-3 py-2.5 text-base sm:text-sm",
+        "placeholder:text-dim",
+        "transition-[border-color] duration-150",
+        invalid ? "border-negative" : "border-border",
+        className
+      )}
+      {...props}
+    />
+  )
+);
+Textarea.displayName = "Textarea";
+
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return <label className={cn("block text-[13px] font-medium text-text", className)} {...props} />;
 }

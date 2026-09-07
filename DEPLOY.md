@@ -70,12 +70,21 @@ SCHEDULER_RUN_ON_START=true
 NODE_ENV=production
 BACKEND_URL=http://backend.railway.internal:3000
 PROXY_SHARED_SECRET=<the same value set on the backend>
+GMAIL_USER=allotwise@gmail.com
+GMAIL_APP_PASSWORD=<a Gmail App Password, not the account password>
 ```
 
 - `NODE_ENV=production` gates the CSP and HSTS headers in `next.config.ts`.
   Without it the app still runs, but unprotected.
 - Do **not** set `PORT`. Railway injects it and `next start` reads it; this is
   why the start script no longer hardcodes a port.
+- **`GMAIL_USER`/`GMAIL_APP_PASSWORD` are optional** (`lib/mail.ts`) — without
+  them the waitlist form still saves every signup to `waitlist.jsonl` as
+  normal, it just skips emailing a notification to `GMAIL_USER` and logs that
+  it did. Google rejects the account's real password for SMTP login; generate
+  an App Password at https://myaccount.google.com/apppasswords (requires
+  2-Step Verification on that Google account first). See `.env.example` for
+  the full steps.
 
 ## Volumes
 

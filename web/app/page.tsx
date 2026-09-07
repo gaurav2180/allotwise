@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { ContactButton } from "@/components/contact-button";
 import { LogoLockup } from "@/components/logo";
 import { LiveGmp } from "@/components/landing/live-gmp";
 import { Reveal } from "@/components/landing/reveal";
@@ -83,6 +84,7 @@ export default function LandingPage() {
               one in the reading flow. The footer keeps a quiet link for
               anyone who reaches the bottom. */}
           <div className="ml-auto flex items-center gap-2">
+            <ContactButton />
             <ThemeToggle />
           </div>
         </div>

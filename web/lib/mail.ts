@@ -2,25 +2,23 @@ import "server-only";
 import nodemailer from "nodemailer";
 
 /**
- * Sends the waitlist-signup notification to the inbox that actually reads it.
- *
  * Gmail SMTP + an App Password, not a transactional-email provider — this is
- * a handful of signups a day for a pre-launch tool, not a mailing list, and
+ * a handful of messages a day for a pre-launch tool, not a mailing list, and
  * it uses the address that already exists (allotwise@gmail.com) rather than
  * standing up a new account. GMAIL_USER/GMAIL_APP_PASSWORD are required; a
  * missing App Password means Google will reject plain-password SMTP login,
  * so this fails loudly in the server log rather than pretending to send.
  *
- * Never throws — a signup is already durably recorded in the waitlist file
- * by the time this runs, and an email hiccup (bad credentials, Gmail rate
- * limiting) is not a reason to tell that visitor their signup failed.
+ * Never throws — the caller has already durably saved the record (waitlist
+ * file, contact file) by the time this runs, and an email hiccup (bad
+ * credentials, Gmail rate limiting) is not a reason to fail that response.
  */
-export async function notifyWaitlistSignup(email: string): Promise<void> {
+async function notify(subject: string, text: string): Promise<void> {
   const user = process.env.GMAIL_USER;
   const pass = process.env.GMAIL_APP_PASSWORD;
 
   if (!user || !pass) {
-    console.error("notifyWaitlistSignup: GMAIL_USER/GMAIL_APP_PASSWORD not set — skipping email.");
+    console.error(`notify: GMAIL_USER/GMAIL_APP_PASSWORD not set — skipping "${subject}".`);
     return;
   }
 
@@ -30,13 +28,23 @@ export async function notifyWaitlistSignup(email: string): Promise<void> {
       auth: { user, pass },
     });
 
-    await transporter.sendMail({
-      from: `Allotwise <${user}>`,
-      to: user,
-      subject: "New Allotwise waitlist signup",
-      text: `${email} joined the allotment-alerts waitlist just now.`,
-    });
+    await transporter.sendMail({ from: `Allotwise <${user}>`, to: user, subject, text });
   } catch (err) {
-    console.error("notifyWaitlistSignup failed:", err instanceof Error ? err.message : err);
+    console.error(`notify failed ("${subject}"):`, err instanceof Error ? err.message : err);
   }
+}
+
+export function notifyWaitlistSignup(email: string): Promise<void> {
+  return notify(
+    "New Allotwise waitlist signup",
+    `${email} joined the allotment-alerts waitlist just now.`
+  );
+}
+
+export function notifyContactMessage(fields: { name?: string; email: string; message: string }): Promise<void> {
+  const from = fields.name ? `${fields.name} <${fields.email}>` : fields.email;
+  return notify(
+    `New Allotwise contact message from ${from}`,
+    `From: ${from}\n\n${fields.message}`
+  );
 }
