@@ -32,6 +32,22 @@ function ensureMarketColumns(d) {
   }
 }
 
+// Issue size must be the rupee amount a source published, never a share count.
+// Rows synced before that rule carry NSE's count ("2,24,63,137 shares"), and
+// nothing overwrites them -- updateMarketMeta skips nulls, so a row IPO Ji has
+// not reached keeps the wrong value indefinitely. Clearing it makes the row show
+// a dash until a real amount arrives, which is the honest state. Idempotent: a
+// value with no rupee or crore/lakh marker is by definition not an amount.
+function clearShareCountIssueSizes(d) {
+  d.exec(`
+    UPDATE market_ipos SET issue_size = NULL
+     WHERE issue_size IS NOT NULL
+       AND issue_size NOT LIKE '%₹%'
+       AND lower(issue_size) NOT LIKE '%cr%'
+       AND lower(issue_size) NOT LIKE '%lakh%'
+       AND lower(issue_size) NOT LIKE '%crore%'`);
+}
+
 export function getDb() {
   if (db) return db;
   const path = resolve(config.dbPath);
@@ -41,6 +57,7 @@ export function getDb() {
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(readFileSync(resolve(here, 'schema.sql'), 'utf8'));
   ensureMarketColumns(db);
+  clearShareCountIssueSizes(db);
   return db;
 }
 

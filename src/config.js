@@ -57,9 +57,11 @@ export const config = {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    // Max IPO Watch detail pages to fetch per metadata sync (bounds load /
-    // Cloudflare exposure -- only upcoming/open IPOs need fresh details).
-    detailFetchLimit: num(process.env.GMP_DETAIL_FETCH_LIMIT, 12),
+    // Max detail pages to fetch per metadata sync. Only upcoming/open IPOs need
+    // fresh details, but 12 stopped covering them once the calendar grew past
+    // 30 rows -- issues left outside the window keep whatever they were last
+    // given, which is usually nothing. At 1.2s between pages this is ~30s.
+    detailFetchLimit: num(process.env.GMP_DETAIL_FETCH_LIMIT, 24),
   },
 
   nse: {

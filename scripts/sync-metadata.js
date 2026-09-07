@@ -48,7 +48,17 @@ async function syncDetails() {
     if (i.status !== 'upcoming' && i.status !== 'open') continue;
     if (!bySlug.has(i.slug)) bySlug.set(i.slug, i);
   }
-  const targets = [...bySlug.values()].slice(0, config.gmp.detailFetchLimit);
+
+  // Open issues first. The default ordering is by open date descending, which
+  // puts the furthest-off upcoming IPOs at the front -- so an issue people are
+  // applying to *today* could fall past the fetch limit and sit there with no
+  // lot size or issue size while an IPO three weeks away had both.
+  const targets = [...bySlug.values()]
+    .sort((a, b) => {
+      if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
+      return String(a.openDate ?? '').localeCompare(String(b.openDate ?? ''));
+    })
+    .slice(0, config.gmp.detailFetchLimit);
 
   let ok = 0;
   let failed = 0;
