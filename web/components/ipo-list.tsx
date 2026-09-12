@@ -54,6 +54,71 @@ async function fetchIpos(): Promise<IpoList> {
   return parsed.data;
 }
 
+/**
+ * Ordering, one comparator per tab.
+ *
+ * Everything was previously ranked by premium, highest first, which read as
+ * scrambled the moment a date appeared on the row: the Ongoing tab ran
+ * "closes in 3d, 3d, 4d, 4d, 3d" down the screen. A premium is worth ranking by
+ * only when the rows are otherwise interchangeable, and they never are here —
+ * each tab has a deadline that matters more.
+ *
+ * Every comparator ends on the name so equal dates resolve the same way on
+ * every render, rather than depending on the order the API happened to return.
+ */
+const FAR_FUTURE = "9999-12-31";
+const LONG_PAST = "0000-01-01";
+
+const byName = (a: IpoListItem, b: IpoListItem) => a.name.localeCompare(b.name);
+
+/** Open issues first, closing soonest — then those closed and awaiting allotment. */
+export function compareOngoing(a: IpoListItem, b: IpoListItem): number {
+  const openRank = (r: IpoListItem) => (derivePhase(r) === "open" ? 0 : 1);
+  const diff = openRank(a) - openRank(b);
+  if (diff !== 0) return diff;
+
+  // Still open: the close date is a deadline, so the nearest one leads.
+  if (openRank(a) === 0) {
+    return (a.closeDate ?? FAR_FUTURE).localeCompare(b.closeDate ?? FAR_FUTURE) || byName(a, b);
+  }
+  // Closed and waiting: whichever closed most recently is furthest from its
+  // allotment, but it is also the one the reader just applied to.
+  return (b.closeDate ?? LONG_PAST).localeCompare(a.closeDate ?? LONG_PAST) || byName(a, b);
+}
+
+/** Opening soonest first; an issue with no date announced sits at the end. */
+export function compareUpcoming(a: IpoListItem, b: IpoListItem): number {
+  // A null date cannot be placed among real ones, and sorting it as "" would
+  // put Jio and PhonePe above an issue opening tomorrow.
+  return (a.openDate ?? FAR_FUTURE).localeCompare(b.openDate ?? FAR_FUTURE) || byName(a, b);
+}
+
+/** Allotment out but not yet listed first — there is still something to come. */
+export function compareAllotted(a: IpoListItem, b: IpoListItem): number {
+  const listedRank = (r: IpoListItem) => (r.listedOn || r.listing ? 1 : 0);
+  const diff = listedRank(a) - listedRank(b);
+  if (diff !== 0) return diff;
+
+  // Most recent first within each group: a listing from yesterday is worth more
+  // than one from a fortnight ago.
+  const key = (r: IpoListItem) => r.listedOn ?? r.closeDate ?? LONG_PAST;
+  return key(b).localeCompare(key(a)) || byName(a, b);
+}
+
+/**
+ * Search spans every tab, so it needs one order across all of them: what is
+ * live, then what is coming, then what is done.
+ */
+export function compareSearch(a: IpoListItem, b: IpoListItem): number {
+  const phaseRank = (r: IpoListItem) => {
+    const phase = derivePhase(r);
+    return phase === "open" ? 0 : phase === "upcoming" ? 1 : 2;
+  };
+  const diff = phaseRank(a) - phaseRank(b);
+  if (diff !== 0) return diff;
+  return phaseRank(a) === 1 ? compareUpcoming(a, b) : compareOngoing(a, b);
+}
+
 const BOARDS: { value: BoardFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "mainboard", label: "Mainboard" },
@@ -113,17 +178,10 @@ export function IpoList() {
       ? scoped.filter((r) => r.name.toLowerCase().includes(q))
       : scoped.filter((r) => bucketOf(r) === filter);
 
-    // Allotted issues are resolved, so ranking them by GMP — a forecast for
-    // an outcome that already happened — isn't a useful order. Most recently
-    // closed first instead: that's the result someone opening this tab is
-    // actually here to check. (No allotment date exists at the list level
-    // without an N+1 fetch per row, but close date tracks it closely enough.)
-    if (!isSearching && filter === "allotted") {
-      return [...list].sort((a, b) => (b.closeDate ?? "").localeCompare(a.closeDate ?? ""));
-    }
-
-    // Highest premium first within a bucket — the rows worth looking at.
-    return [...list].sort((a, b) => (b.gmp ?? 0) - (a.gmp ?? 0));
+    if (isSearching) return [...list].sort(compareSearch);
+    if (filter === "allotted") return [...list].sort(compareAllotted);
+    if (filter === "upcoming") return [...list].sort(compareUpcoming);
+    return [...list].sort(compareOngoing);
   }, [scoped, filter, isSearching, q]);
 
   // Memoized so its identity is stable across renders that don't actually
