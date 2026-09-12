@@ -2,6 +2,7 @@
 // up; set ALLOTWISE_LIVE=1 to include the two tests that call KFintech.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { spawn } from 'node:child_process';
 import { createApp } from '../src/app.js';
 import { slugify, parsePan, parseSlug } from '../src/lib/validate.js';
 import { maskPan, logger } from '../src/lib/logger.js';
@@ -279,6 +280,24 @@ test('ipoji.parse reads the data attributes and full offer dates', () => {
   assert.equal(m.gmp, null);
   assert.equal(m.estListingPrice, null);
   assert.equal(m.openDate, '2026-09-11');
+
+  // An entity in an attribute has to decode too. The calendar card decodes its
+  // text, so leaving `data-name` raw gave the two pages different names for one
+  // company -- "Manipal Payment &amp; Identity Solutions" against "Manipal
+  // Payment & Identity Solutions" -- and therefore different slugs, which put
+  // it in the list twice from a single source.
+  const [amp] = parseIpoJi(
+    '<tr class="gmp-row" data-type="sme" data-status="open" data-hasgmp="false" data-name="Manipal Payment &amp; Identity Solutions"></tr>'
+  );
+  assert.equal(amp.name, 'Manipal Payment & Identity Solutions');
+  assert.equal(amp.slug, 'manipal-payment-identity-solutions');
+  assert.equal(
+    amp.slug,
+    parseIpoJi.listing(
+      '<article class="card ipo-card" data-ipo-board="sme"><h3 class="ipo-card-name">Manipal Payment &amp; Identity Solutions</h3></article>'
+    )[0].slug,
+    'both pages must produce the same slug for the same company'
+  );
 });
 
 test('ipoji.parseDetails prefers the fact list and falls back to the timeline', () => {
@@ -364,8 +383,41 @@ test('a second GMP source is what puts an IPO in the list twice', () => {
   ];
   assert.equal(mergeBySlug(rows).length, 2, 'deduplication cannot save a two-source setup');
 
-  // Which is why the default is a single source.
+  // Which is why the default is a single source, and why configuring a second
+  // one has to be deliberate rather than a variable someone edits in passing.
   assert.deepEqual(config.gmp.sources, ['ipoji']);
+});
+
+test('a second GMP source cannot be configured by accident', async () => {
+  const run = (env) =>
+    new Promise((resolve) => {
+      const child = spawn(
+        process.execPath,
+        ['-e', "import('./src/config.js').then(m => console.log(m.config.gmp.sources.join(',')))"],
+        { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }
+      );
+      let out = '';
+      let err = '';
+      child.stdout.on('data', (c) => (out += c));
+      child.stderr.on('data', (c) => (err += c));
+      child.on('close', (code) => resolve({ code, out: out.trim(), err }));
+    });
+
+  // The process must refuse to start, and say why -- duplicated rows surfacing
+  // hours after an unrelated-looking config edit is the failure being prevented.
+  const refused = await run({ GMP_SOURCES: 'ipoji,ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: '' });
+  assert.notEqual(refused.code, 0, 'two sources must not boot');
+  assert.match(refused.err, /only one is supported/);
+  assert.match(refused.err, /National Stock Exchange of India/, 'the error has to explain the failure');
+
+  // Deliberate is still allowed: the guard is a tripwire, not a wall.
+  const allowed = await run({ GMP_SOURCES: 'ipoji,ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: 'true' });
+  assert.equal(allowed.code, 0);
+  assert.equal(allowed.out, 'ipoji,ipowatch');
+
+  const single = await run({ GMP_SOURCES: 'ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: '' });
+  assert.equal(single.code, 0);
+  assert.equal(single.out, 'ipowatch');
 });
 
 test('mergeBySlug collapses per-source rows without mixing one quote with another', () => {

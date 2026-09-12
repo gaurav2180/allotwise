@@ -26,8 +26,15 @@ async function main() {
       // per issue for facts we have just been handed. That sync still runs --
       // it covers the allotment and listing dates, which the cards omit -- but
       // only for the issues anyone is waiting on.
-      if (rec.issueSize || rec.lotSize) {
-        updateMarketMeta(rec.slug, { issueSize: rec.issueSize, lotSize: rec.lotSize });
+      if (rec.issueSize || rec.lotSize || rec.logo) {
+        updateMarketMeta(rec.slug, {
+          issueSize: rec.issueSize,
+          lotSize: rec.lotSize,
+          // The card names the company's logo outright. The frontend previously
+          // had to guess it, fuzzy-matching image filenames against company
+          // names, which left about one issue in five on a monogram tile.
+          logo: rec.logo,
+        });
         details++;
       }
     }

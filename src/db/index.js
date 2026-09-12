@@ -22,6 +22,7 @@ const MARKET_EXTRA_COLUMNS = {
   allotment_date: 'TEXT',
   refund_date: 'TEXT',
   listing_date: 'TEXT',
+  logo_url: 'TEXT',
   details_updated_at: 'TEXT',
 };
 
@@ -32,12 +33,6 @@ function ensureMarketColumns(d) {
   }
 }
 
-// Issue size must be the rupee amount a source published, never a share count.
-// Rows synced before that rule carry NSE's count ("2,24,63,137 shares"), and
-// nothing overwrites them -- updateMarketMeta skips nulls, so a row IPO Ji has
-// not reached keeps the wrong value indefinitely. Clearing it makes the row show
-// a dash until a real amount arrives, which is the honest state. Idempotent: a
-// value with no rupee or crore/lakh marker is by definition not an amount.
 // Rows from a source that is no longer configured. Dropping a source from
 // GMP_SOURCES stops new rows arriving but leaves the old ones sitting in the
 // table, and they keep showing up in the list -- which is exactly the duplicate
@@ -51,6 +46,12 @@ function dropUnconfiguredSources(d) {
   d.prepare(`DELETE FROM market_ipos WHERE source NOT IN (${placeholders})`).run(...wanted);
 }
 
+// Issue size must be the rupee amount a source published, never a share count.
+// Rows synced before that rule carry NSE's count ("2,24,63,137 shares"), and
+// nothing overwrites them -- updateMarketMeta skips nulls, so a row IPO Ji has
+// not reached keeps the wrong value indefinitely. Clearing it makes the row show
+// a dash until a real amount arrives, which is the honest state. Idempotent: a
+// value with no rupee or crore/lakh marker is by definition not an amount.
 function clearShareCountIssueSizes(d) {
   d.exec(`
     UPDATE market_ipos SET issue_size = NULL
@@ -221,6 +222,7 @@ const marketRowToApi = (r) => ({
   allotmentDate: r.allotment_date ?? null,
   refundDate: r.refund_date ?? null,
   listingDate: r.listing_date ?? null,
+  logo: r.logo_url ?? null,
 });
 
 // Patch metadata/detail fields on the primary market row for a slug. Only the
@@ -237,6 +239,7 @@ const META_COLUMNS = {
   allotmentDate: 'allotment_date',
   refundDate: 'refund_date',
   listingDate: 'listing_date',
+  logo: 'logo_url',
 };
 
 export function updateMarketMeta(slug, fields) {

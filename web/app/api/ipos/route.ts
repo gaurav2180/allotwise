@@ -92,11 +92,15 @@ export async function GET(request: Request) {
   // list on NSE Emerge and do carry figures.
   const eligible = rows.filter((r) => derivePhase(r) !== "upcoming");
 
-  // Logos are cached upstream-side and never fatal, so this runs alongside the
-  // subscription fan-out rather than gating it.
-  const logosPromise = resolveLogos(rows.map((r) => r.name)).catch(
-    (): Record<string, string> => ({})
-  );
+  // The backend now carries the logo the source states outright for each issue,
+  // so only the rows it has no logo for need the guessing path below — which
+  // fuzzy-matches image filenames against company names and is what used to
+  // leave about one issue in five on a monogram tile. Skipped entirely once
+  // every row has one.
+  const needLogo = rows.filter((r) => !r.logo).map((r) => r.name);
+  const logosPromise = needLogo.length
+    ? resolveLogos(needLogo).catch((): Record<string, string> => ({}))
+    : Promise.resolve<Record<string, string>>({});
 
   // Once an issue actually lists, its real debut price supersedes the grey
   // market's forecast. The outcome table only gains a row after listing, so a
@@ -174,7 +178,7 @@ export async function GET(request: Request) {
             }
           : {}),
         subscription: subs.get(r.slug) ?? null,
-        logo: logos[r.name] ?? null,
+        logo: r.logo ?? logos[r.name] ?? null,
         listing: listed
           ? { price: listed.listingPrice, issuePrice: listed.issuePrice, gainPct: listed.gainPct }
           : null,

@@ -22,6 +22,10 @@ export const calendarRowSchema = z.object({
   estListingPrice: z.number().nullable(),
   estGainPct: z.number().nullable(),
   source: z.string(),
+  // The source states the company's logo alongside the issue, so this is the
+  // one that needs no guessing. Defaulted rather than required: a backend that
+  // predates the field still parses.
+  logo: z.string().nullable().default(null),
   allotment: z.object({
     available: z.boolean(),
     // Present only when available — and it is the REGISTRAR slug, which differs

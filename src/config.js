@@ -109,6 +109,31 @@ export const config = {
   },
 };
 
+// Refuse to start with more than one GMP source unless someone says, in writing,
+// that they mean it.
+//
+// This is not a style preference. Two trackers name the same company
+// differently -- "NSE" against "National Stock Exchange of India" -- and that
+// pair shares no slug and no name token, so `mergeBySlug` sees two IPOs and the
+// fuzzy matcher used for registrar links scores them at zero. The result is the
+// same issue listed twice, which is a data bug a user sees immediately and no
+// deduplication downstream can fix. It was shipped once already.
+//
+// Failing at boot is the point: a second source added by editing an environment
+// variable would otherwise surface hours later as duplicated rows nobody
+// connects to the change.
+if (config.gmp.sources.length > 1 && process.env.GMP_ALLOW_MULTIPLE_SOURCES !== 'true') {
+  throw new Error(
+    `GMP_SOURCES lists ${config.gmp.sources.length} sources (${config.gmp.sources.join(', ')}), ` +
+      'but only one is supported.\n' +
+      '  Two sources put the same IPO in the list twice whenever they name it differently\n' +
+      '  ("NSE" vs "National Stock Exchange of India"): no shared slug, no shared name token,\n' +
+      '  so nothing downstream can tell they are one company.\n' +
+      '  Set GMP_SOURCES to a single source, or GMP_ALLOW_MULTIPLE_SOURCES=true if you have\n' +
+      '  a way to reconcile the names and accept duplicates until you do.'
+  );
+}
+
 if (isProd && !config.panHashSecret) {
   // Say what the process can actually see. "Must be set" is true but useless
   // when it *was* set — on another service, in another environment, or after

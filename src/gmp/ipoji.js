@@ -39,16 +39,21 @@ const CALENDAR_URL = 'https://www.ipoji.com/ipo';
 
 const NAMED_ENTITIES = { amp: '&', nbsp: ' ', lt: '<', gt: '>', quot: '"', ndash: '–', mdash: '—', rupee: '₹' };
 
-// The page currently serves ₹ and – as literal characters, but the rupee sign
-// and the dash in a date range are exactly the two places a CMS is most likely
-// to start emitting entities, and either would end up stored verbatim in a
-// price band or issue size. Decoding costs nothing and removes the trap.
-const stripTags = (s) =>
-  s
-    .replace(/<[^>]*>/g, ' ')
+// Entities have to be decoded everywhere a name can reach, not just in element
+// text. "Manipal Payment &amp; Identity Solutions" appears both as card text and
+// as a `data-name` attribute; decoding only the former gave the two pages
+// different names for one company -- and so different slugs, which put it in the
+// list twice from a single source. Anything that becomes a slug goes through
+// here.
+function decodeEntities(s) {
+  return String(s ?? '')
     .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16)))
-    .replace(/&([a-z]+);/gi, (m, name) => NAMED_ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/&([a-z]+);/gi, (m, name) => NAMED_ENTITIES[name.toLowerCase()] ?? m);
+}
+
+const stripTags = (s) =>
+  decodeEntities(String(s ?? '').replace(/<[^>]*>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -153,6 +158,11 @@ export function parseListing(html, { ref = new Date() } = {}) {
       status,
       sourceUpdatedAt: null,
       source: meta.id,
+      // The card pairs the logo with the company directly, so there is nothing
+      // to guess. Resolving logos by fuzzy-matching image filenames against
+      // company names -- which is what the frontend had to do without this --
+      // left roughly one issue in five on a monogram tile.
+      logo: (card.match(/<img[^>]+src="(https:\/\/media\.ipoji\.com\/[^"]+)"/i) ?? [])[1] ?? null,
       // Carried through to the metadata sync, which would otherwise fetch a
       // detail page per issue to learn what the card already says.
       issueSize: stats['issue size'] || null,
@@ -181,7 +191,10 @@ export function parse(html) {
     const end = block.indexOf('</tr>');
     const row = end < 0 ? block : block.slice(0, end);
     const attrs = row.slice(0, row.indexOf('>'));
-    const attr = (k) => (attrs.match(new RegExp(`${k}="([^"]*)"`, 'i')) ?? [])[1];
+    const attr = (k) => {
+      const v = (attrs.match(new RegExp(`${k}="([^"]*)"`, 'i')) ?? [])[1];
+      return v === undefined ? undefined : decodeEntities(v);
+    };
 
     const name = attr('data-name')?.trim();
     if (!name) continue;

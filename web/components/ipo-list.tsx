@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { FilterTabs, type TabOption } from "@/components/filter-tabs";
 import { IpoRow, IpoListHeader } from "@/components/ipo-row";
-import { PastList } from "@/components/past-list";
 import {
   ListSkeleton,
   NoMatchesState,
@@ -18,7 +17,12 @@ import { useIpoSearch } from "@/hooks/use-ipo-search";
 import { ipoListSchema, apiErrorSchema, type IpoList, type IpoListItem } from "@/lib/schemas";
 import { derivePhase } from "@/lib/utils";
 
-type Filter = "ongoing" | "upcoming" | "allotted" | "past";
+// No "past" tab. Listing history is still fetched — it supplies the listing
+// price and gain shown on a row that has listed — but it is no longer a
+// destination of its own. `PastList` in components/past-list.tsx renders it and
+// is currently unreferenced; restoring the tab is that import plus an entry in
+// `tabs` below.
+type Filter = "ongoing" | "upcoming" | "allotted";
 type BoardFilter = "all" | "mainboard" | "sme";
 
 /**
@@ -29,7 +33,7 @@ type BoardFilter = "all" | "mainboard" | "sme";
  * "Ongoing" deliberately includes an issue that has closed but whose allotment
  * has not been published: from the applicant's side it is still in flight.
  */
-function bucketOf(ipo: IpoListItem): Exclude<Filter, "past"> {
+function bucketOf(ipo: IpoListItem): Filter {
   if (ipo.allotment.available || ipo.listedOn || ipo.listing) return "allotted";
   // Dates over scraped status: an issue that opened overnight is no longer
   // upcoming, whatever the last sync recorded.
@@ -122,10 +126,6 @@ export function IpoList() {
     return [...list].sort((a, b) => (b.gmp ?? 0) - (a.gmp ?? 0));
   }, [scoped, filter, isSearching, q]);
 
-  // Listing history is fetched separately and isn't searched here, so an
-  // active search always falls back to the current cycle's list.
-  const isPast = !isSearching && filter === "past";
-
   // Memoized so its identity is stable across renders that don't actually
   // change the counts (opening a row, for one) — FilterTabs re-measures and
   // scrolls the active tab into view whenever this reference changes, and a
@@ -136,8 +136,6 @@ export function IpoList() {
       { value: "allotted", label: "Allotted", count: counts.allotted },
       { value: "ongoing", label: "Ongoing", count: counts.ongoing },
       { value: "upcoming", label: "Upcoming", count: counts.upcoming },
-      // No count: the listing history is fetched only when this tab is opened.
-      { value: "past", label: "Past" },
     ],
     [counts]
   );
@@ -158,9 +156,7 @@ export function IpoList() {
             wrapped badly on a phone — it now rides the PANs nav item, which is
             both always visible and the place you would go to act on it. */}
         <div className="flex flex-wrap items-center gap-3">
-          {/* Board does not apply to listing history, so it is hidden rather
-              than shown disabled. */}
-          <div className={`flex items-center gap-1.5 ${isPast ? "hidden" : ""}`} role="group" aria-label="Filter by board">
+          <div className="flex items-center gap-1.5" role="group" aria-label="Filter by board">
             {BOARDS.map((b) => {
               const active = board === b.value;
               return (
@@ -191,11 +187,9 @@ export function IpoList() {
 
       {/* Listing history is a different dataset with a different question
           ("how did it actually do"), so it gets its own list and columns. */}
-      {isPast && <PastList />}
+      {query.isPending && <ListSkeleton />}
 
-      {!isPast && query.isPending && <ListSkeleton />}
-
-      {!isPast && query.isError && (
+      {query.isError && (
         <UnreachableState
           message={query.error instanceof Error ? query.error.message : "The request failed."}
           onRetry={() => query.refetch()}
@@ -203,11 +197,11 @@ export function IpoList() {
         />
       )}
 
-      {!isPast && query.data && rows.length === 0 && isSearching && (
+      {query.data && rows.length === 0 && isSearching && (
         <NoSearchMatchesState query={search} onReset={() => setSearch("")} />
       )}
 
-      {!isPast && query.data && rows.length === 0 && !isSearching && (
+      {query.data && rows.length === 0 && !isSearching && (
         <NoMatchesState
           filter={[board === "all" ? "" : board, filter].filter(Boolean).join(" ")}
           // Clearing the board filter is the useful escape here — the tab is a
@@ -220,7 +214,7 @@ export function IpoList() {
         />
       )}
 
-      {!isPast && query.data && rows.length > 0 && (
+      {query.data && rows.length > 0 && (
         <>
           {/* Only actionable on Allotted: an Ongoing or Upcoming issue has no
               published result yet, so prompting for a PAN there is premature —

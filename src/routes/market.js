@@ -59,6 +59,7 @@ marketRouter.get('/calendar', (req, res, next) => {
           estListingPrice: i.estListingPrice,
           estGainPct: i.estGainPct,
           source: i.source,
+          logo: i.logo,
           allotment: link ? { available: true, ipo: link.registrar_slug } : { available: false },
         };
       }),
