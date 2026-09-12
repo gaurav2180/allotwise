@@ -48,7 +48,7 @@ export function IpoDetailPanel({
 }: {
   slug: string;
   gmp: number | null;
-  gmpSource: "ipowatch" | "ipoji";
+  gmpSource: string;
 }) {
   const { data, isPending, isError } = useQuery({
     queryKey: ["ipo", slug],

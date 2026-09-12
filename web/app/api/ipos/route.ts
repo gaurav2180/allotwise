@@ -6,7 +6,7 @@ import { peekDetails, scrapeDetails } from "@/lib/ipo-details";
 import { bestMatch } from "@/lib/match";
 import { resolveSubscriptions, type SubscriptionResult } from "@/lib/nse";
 import { resolveIpojiSubscriptions } from "@/lib/ipoji-subscription";
-import { resolveIpojiGmp, type IpojiGmpQuote } from "@/lib/ipoji-gmp";
+
 import { capPrice, derivePhase } from "@/lib/utils";
 import { calendarSchema } from "@/lib/schemas";
 
@@ -35,11 +35,10 @@ type SubsMap = Map<string, SubscriptionResult>;
 /**
  * Warm the detail cache and read listing dates out of it.
  *
- * Two things need the detail page: the listing date (the backend's metadata
- * sync skips closed IPOs, so their date is null in the database — exactly the
- * set that is about to list) and the full price band (the calendar carries
- * only the cap price). So this is called with *every* slug, not just the
- * closed ones, and `priceBandFull` below reads the same cache.
+ * Only the listing date now: the backend's metadata sync skips closed IPOs, so
+ * their date is null in the database — exactly the set that is about to list.
+ * The price band used to come from here too, until the calendar started
+ * carrying the full range itself.
  *
  * A cold cache must not stall the page: warming runs against a short budget
  * and whatever has landed by then is used, so the first load after a restart
@@ -152,25 +151,24 @@ export async function GET(request: Request) {
   // below discards a future one anyway.
   const datesPromise = listingDates(rows.map((r) => r.slug));
 
-  // One tracker per row, for every board.
+  // The premium is taken from the backend and nowhere else.
   //
-  // The premium and its day-wise chart have to come from the same place: the
-  // two trackers disagree (Kanohar: IPO Watch ₹205, IPO Ji ₹180) and a row
-  // showing one number above a chart ending on another reads as a bug. IPO Ji
-  // wins because it is the only source with real day-wise history — IPO Watch
-  // publishes no history table at all — so pinning the headline to it is what
-  // makes the chart honest. Where IPO Ji has no quote, the row falls back to
-  // the backend's IPO Watch figure *and* to our own recorded series, so both
-  // halves move together either way.
-  const quotes = new Map<string, IpojiGmpQuote>();
-  const gmpPromise = resolveIpojiGmp(rows, quotes, { budgetMs: 6000 }).catch(() => undefined);
-
+  // This used to re-fetch IPO Ji's GMP table here and overlay it, from the days
+  // when the backend ran IPO Watch and the two disagreed. The backend now reads
+  // IPO Ji itself, so the overlay fetched the same site for the same number a
+  // second time — and it made things worse rather than merely redundant. That
+  // table carries ~18 issues where the calendar carries ~51, and the row was
+  // labelled "ipoji" only when the overlay hit, so 28 of 53 rows were stamped
+  // `ipowatch` while showing IPO Ji data. The chart panel then used that label
+  // to explain away a cross-tracker disagreement that could not exist.
+  //
+  // One fetch, one number, one label: whatever the backend says, and `r.source`
+  // to say where it came from.
   const [logos, listings, dates] = await Promise.all([
     logosPromise,
     listingsPromise,
     datesPromise,
   ]);
-  await gmpPromise;
   await Promise.all([subsPromise, ipojiPromise]);
   for (const [slug, value] of ipojiSubs) subs.set(slug, value);
   const today = todayIso();
@@ -181,20 +179,12 @@ export async function GET(request: Request) {
       const listed = listings.length ? bestMatch(r.name, listings, (l) => l.name) : null;
       const on = dates.get(r.slug) ?? null;
 
-      // Only when IPO Ji actually quotes this issue; otherwise the backend's
-      // figure stands rather than the row losing its premium entirely.
-      const quote = quotes.get(r.slug) ?? null;
-
       return {
         ...r,
-        gmpSource: quote ? ("ipoji" as const) : ("ipowatch" as const),
-        ...(quote
-          ? {
-              gmp: quote.gmp,
-              estGainPct: quote.pct ?? r.estGainPct,
-              estListingPrice: quote.indicative ?? r.estListingPrice,
-            }
-          : {}),
+        // Whoever the backend got the row from. `gmp`, `estGainPct` and
+        // `estListingPrice` pass through untouched, so the figure, the
+        // percentage it implies and the chart below all describe one reading.
+        gmpSource: r.source,
         subscription: subs.get(r.slug) ?? null,
         logo: r.logo ?? logos[r.name] ?? null,
         listing: listed
@@ -205,11 +195,14 @@ export async function GET(request: Request) {
             // The calendar carries the debut price for exactly those, so it
             // fills in whenever the table has no match.
             listingFrom(r.listingPrice, r.priceBand),
-        // Cache-only: the calendar's own `priceBand` is just the cap price, and
-        // fetching 30 detail pages to widen it would cost more than the figure
-        // is worth on a cold load. The warmer keeps this hot; until it has run,
-        // the row falls back to the cap price it already had.
-        priceBandFull: peekDetails(r.slug)?.priceBand ?? null,
+        // No `priceBandFull` overlay any more. It existed because the calendar
+        // used to carry only the cap price, so a second source was scraped to
+        // widen it — and that source disagreed: Axiom Gas read ₹50-53 from the
+        // calendar and ₹67 from the overlay, so the row displayed ₹67 while the
+        // estimated profit was computed against a ₹53 cap. The calendar now
+        // publishes the full band itself, which makes the overlay both
+        // unnecessary and the only thing that could contradict it.
+        //
         // An issue whose listing date has arrived has listed, whether or not its
         // debut price has been published yet. The two are separate facts.
         listedOn: on && on <= today ? on : null,

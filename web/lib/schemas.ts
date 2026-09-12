@@ -83,14 +83,11 @@ export const ipoListItemSchema = calendarRowSchema.extend({
   // Set when the listing date has arrived, independent of whether the debut
   // price has been published — an issue lists before the outcome is known.
   listedOn: z.string().nullable().default(null),
-  // The full band ("₹408 to ₹429 Per Share") from the detail scrape. The
-  // calendar only carries the cap price, so without this a ₹408–429 issue
-  // reads as a flat ₹429. Cache-only on the request path, so it is null until
-  // the background warmer has fetched that IPO's detail page.
-  priceBandFull: z.string().nullable().default(null),
-  // Which tracker the premium on this row came from. SME is sourced from IPO
-  // Ji end to end; mainboard stays on the backend's IPO Watch figure.
-  gmpSource: z.enum(["ipowatch", "ipoji"]).default("ipowatch"),
+  // Which tracker the premium came from — the backend's own `source`, passed
+  // through. A plain string rather than an enum: the set of sources is the
+  // backend's to decide, and a new one should not make the whole list fail to
+  // parse. Every figure on the row comes from this one tracker.
+  gmpSource: z.string().default("ipoji"),
 });
 
 export const ipoListSchema = z.object({

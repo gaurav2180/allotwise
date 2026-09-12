@@ -159,7 +159,8 @@ export function GmpHistoryPanel({
   /** The premium shown on the row, so the note compares against what is on
    *  screen rather than against whatever the backend holds. */
   headlineGmp: number | null;
-  headlineSource: "ipowatch" | "ipoji";
+  /** Which tracker the row's premium came from, for the attribution line. */
+  headlineSource: string;
 }) {
   const [open, setOpen] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -175,16 +176,15 @@ export function GmpHistoryPanel({
 
   const points = data?.history ?? [];
   const latest = points.length ? points[points.length - 1].gmp : null;
-  // Only worth explaining when the chart and the row are on different trackers
-  // *and* the figures actually differ. SME is IPO Ji on both sides now, so it
-  // stays quiet there; mainboard pairs an IPO Watch headline with an IPO Ji
-  // chart, and GMP is unofficial enough that those routinely disagree.
-  const disagrees =
-    data?.source === "ipoji" &&
-    headlineSource !== "ipoji" &&
-    headlineGmp !== null &&
-    latest !== null &&
-    latest !== headlineGmp;
+  // The row and the chart are the same tracker now, so they should end on the
+  // same number — and this says so only when they somehow do not. It used to
+  // fire on a source *label* mismatch and explain a cross-tracker disagreement
+  // that could not exist, on rows that were mislabelled anyway.
+  //
+  // A real gap here means one of the two is stale (the chart is fetched on
+  // expand, the row on page load), which is worth a word rather than leaving
+  // the reader to wonder which figure to believe.
+  const disagrees = headlineGmp !== null && latest !== null && latest !== headlineGmp;
 
   return (
     <div className="mt-4 border-t border-border pt-3">
@@ -243,24 +243,20 @@ export function GmpHistoryPanel({
 
                 <p className="mt-2 text-[11px] text-dim">
                   {data.source === "ipoji" ? (
-                    <>
-                      Day-wise history via IPO Ji (ipoji.com).
-                      {disagrees && (
-                        <>
-                          {" "}
-                          Its latest reading is{" "}
-                          <span className="num">₹{inr(latest as number)}</span> against the{" "}
-                          <span className="num">₹{inr(headlineGmp as number)}</span> above, which
-                          comes from IPO Watch — grey market premium is unofficial and trackers poll
-                          different dealers, so the two rarely match exactly.
-                        </>
-                      )}
-                    </>
+                    <>Day-wise history via IPO Ji (ipoji.com), the same source as the premium above.</>
                   ) : (
                     <>
-                      Recorded by Allotwise from IPO Watch, so the latest point matches the premium
-                      above. History starts from when tracking began, not from the issue&rsquo;s
-                      announcement.
+                      Recorded by Allotwise, so history starts from when tracking began rather than
+                      from the issue&rsquo;s announcement.
+                    </>
+                  )}
+                  {disagrees && (
+                    <>
+                      {" "}
+                      The last point is <span className="num">₹{inr(latest as number)}</span> against
+                      the <span className="num">₹{inr(headlineGmp as number)}</span> above — the
+                      chart loaded just now and the row when the page did, so one of them has moved
+                      since.
                     </>
                   )}
                 </p>

@@ -205,7 +205,7 @@ export function IpoRow({
   // The full band when the detail scrape has reached this IPO, else the
   // calendar's cap price. Both go through the same formatter, so a fixed-price
   // issue and a two-ended band render consistently.
-  const issuePrice = formatPriceBand(ipo.priceBandFull ?? ipo.priceBand);
+  const issuePrice = formatPriceBand(ipo.priceBand);
   // Listed either way: with a published debut price, or by date alone.
   const hasListed = Boolean(ipo.listing || ipo.listedOn);
 
