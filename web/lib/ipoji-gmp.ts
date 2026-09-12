@@ -89,6 +89,20 @@ function percent(raw: string | undefined): number | null {
  * `<time datetime>`, and `data-label` on every cell — so rows are read by label
  * rather than by column position, which survives a column being added.
  */
+/**
+ * The trading day a reading belongs to.
+ *
+ * `datetime` is a UTC instant, but the table is labelled in IST and that is the
+ * day a reader means. Slicing the ISO string puts an evening quote on the wrong
+ * date — 2026-09-11T19:30:00Z is the 12th in Delhi — so the offset is applied
+ * before the date is taken.
+ */
+function istDay(datetime: string): string | null {
+  const ms = Date.parse(datetime);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 export function parseGmpHistory(html: string): GmpPoint[] {
   const start = html.indexOf("gmp-history-table");
   if (start < 0) return [];
@@ -96,9 +110,13 @@ export function parseGmpHistory(html: string): GmpPoint[] {
   if (end < 0) return [];
   const table = html.slice(start, end);
 
-  const out: GmpPoint[] = [];
+  // Keyed by day, because the table can carry several readings for one date
+  // (IPO Ji requotes through the day). Pushing each as its own point put the
+  // same date on the axis three times with the line doubling back between them.
+  const byDay = new Map<string, GmpPoint>();
   for (const row of table.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
-    const date = (row.match(/<time[^>]*datetime="(\d{4}-\d{2}-\d{2})/i) ?? [])[1];
+    const stamp = (row.match(/<time[^>]*datetime="([^"]+)"/i) ?? [])[1];
+    const date = stamp ? istDay(stamp) : null;
     if (!date) continue;
 
     const cell = (label: string) => {
@@ -109,18 +127,25 @@ export function parseGmpHistory(html: string): GmpPoint[] {
     const gmp = money(cell("GMP"));
     if (gmp === null) continue;
 
-    out.push({
+    // Rows arrive newest-first, so the first one seen for a day is that day's
+    // closing reading and an earlier one must not replace it.
+    if (byDay.has(date)) continue;
+    byDay.set(date, {
       date,
       gmp,
-      change: money(cell("Change")),
+      change: null, // Recomputed below, against the previous *day*.
       pct: percent(cell("GMP %")),
       indicative: money(cell("Indicative Listing")),
     });
   }
 
   // The page lists newest first; a chart wants oldest first.
-  out.sort((a, b) => a.date.localeCompare(b.date));
-  return out;
+  const out = [...byDay.values()].sort((a, b) => a.date.localeCompare(b.date));
+
+  // The source's own Change column is the move since its previous *row*, which
+  // may be earlier the same day. Once the series is one point per day that
+  // number no longer describes the step the chart draws, so it is recomputed.
+  return out.map((p, i) => ({ ...p, change: i === 0 ? null : p.gmp - out[i - 1].gmp }));
 }
 
 export interface IpojiGmpQuote {

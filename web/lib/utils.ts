@@ -37,6 +37,54 @@ export function times(n: number | null | undefined): string {
  * caller can fall back rather than print a dash with a currency sign glued to
  * it.
  */
+/** Highest number in a price band string — the cap, which applications are priced at. */
+export function capPrice(band: string | null | undefined): number | null {
+  if (!band) return null;
+  const nums = [...String(band).matchAll(/([\d,]+(?:\.\d+)?)/g)]
+    .map((m) => Number(m[1].replace(/,/g, "")))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return nums.length ? Math.max(...nums) : null;
+}
+
+/**
+ * Shares in the smallest application a retail investor can actually make, and
+ * the premium that would be earned on it.
+ *
+ * The obvious formula — premium times lot size — is wrong for SME, where the
+ * minimum application is **two** lots, not one. Qualiance has a 1,000-share lot
+ * and a ₹2,54,000 minimum, which is 2,000 shares: showing "₹42,000" beside
+ * "Min investment ₹2,54,000" describes half the investment the cell above it
+ * names, and the real figure is ₹84,000. Mainboard is unaffected (its minimum is
+ * one lot), which is why this went unnoticed.
+ *
+ * The multiple is derived from the two published figures rather than assumed, so
+ * it stays right if an issue uses some other minimum. Null unless everything
+ * needed is present and reconciles — a missing row is better than a wrong
+ * number, and this one is about money.
+ */
+export function minApplication(
+  lotSize: number | null | undefined,
+  minInvestment: number | null | undefined,
+  priceBand: string | null | undefined
+): { shares: number; lots: number } | null {
+  const cap = capPrice(priceBand);
+  if (!lotSize || lotSize <= 0 || !minInvestment || minInvestment <= 0 || !cap) return null;
+
+  const lots = Math.round(minInvestment / (lotSize * cap));
+  if (lots < 1) return null;
+
+  // The derived multiple has to reproduce the published minimum exactly, give or
+  // take a rupee of rounding. Every issue checked does: 2,000 × ₹127 = ₹2,54,000,
+  // 178 × ₹84 = ₹14,952, 8 × ₹1,785 = ₹14,280. A proportional tolerance is far
+  // too loose here — at 2% a ₹16,000 discrepancy on a ₹10 lakh minimum passes,
+  // and the whole point of this check is that the three figures describe one
+  // issue. If they do not, show nothing.
+  const implied = lots * lotSize * cap;
+  if (Math.abs(implied - minInvestment) > 1) return null;
+
+  return { shares: lots * lotSize, lots };
+}
+
 export function formatPriceBand(band: string | null | undefined): string | null {
   if (!band) return null;
   const nums = [...band.matchAll(/([\d,]+(?:\.\d+)?)/g)].map((m) => Number(m[1].replace(/,/g, "")));

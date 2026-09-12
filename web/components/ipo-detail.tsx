@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { GmpHistoryPanel } from "@/components/gmp-history";
 import { ipoDetailSchema, type IpoDetail } from "@/lib/schemas";
-import { formatDate, formatIssueSize, inr } from "@/lib/utils";
+import { formatDate, formatIssueSize, inr, minApplication } from "@/lib/utils";
 
 async function fetchDetail(slug: string): Promise<IpoDetail> {
   const res = await fetch(`/api/ipo/${encodeURIComponent(slug)}`, { cache: "no-store" });
@@ -77,17 +77,23 @@ export function IpoDetailPanel({
 
   const { details, timeline } = data;
   const lot = details.lotSize;
-  // GMP is per share, so a lot's worth of premium is the number that means
-  // something to an applicant. Unofficial in, unofficial out — hence "Est.".
-  const estProfit = gmp !== null && lot ? gmp * lot : null;
+  // Premium earned on the smallest application that can actually be made, so
+  // this cell and "Min investment" describe the same money. Not lot size times
+  // premium: SME minimums are two lots, and that version showed half the profit
+  // on the investment named beside it. Unofficial in, unofficial out — "Est.".
+  const minApp = minApplication(lot, details.minInvestment, details.priceBand);
+  const estProfit = gmp !== null && minApp ? gmp * minApp.shares : null;
 
   return (
     <div className="pt-3">
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <Cell label="Lot size" value={lot ? `${inr(lot)} shares` : null} />
-        <Cell label="Min investment" value={details.minInvestment ? `₹${inr(details.minInvestment)}` : null} />
         <Cell
-          label="Est. profit / lot"
+          label={minApp && minApp.lots > 1 ? `Min investment (${minApp.lots} lots)` : "Min investment"}
+          value={details.minInvestment ? `₹${inr(details.minInvestment)}` : null}
+        />
+        <Cell
+          label="Est. profit on min."
           value={estProfit !== null ? `₹${inr(estProfit)}` : null}
         />
         <Cell label="Issue size" value={formatIssueSize(details.issueSize)} />
@@ -111,8 +117,9 @@ export function IpoDetailPanel({
 
       {estProfit !== null && (
         <p className="mt-3 text-[12px] text-dim">
-          Est. profit is grey market premium times lot size. GMP is unofficial and moves daily — it
-          is not a quote, and it is frequently wrong.{" "}
+          Est. profit is the grey market premium on {inr(minApp?.shares ?? 0)} shares — the smallest
+          application this issue allows, the same one priced above. GMP is unofficial and moves daily
+          — it is not a quote, and it is frequently wrong.{" "}
           <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
             Full disclaimer
           </Link>

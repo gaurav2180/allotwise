@@ -69,6 +69,14 @@ function GmpTooltip({ active, payload }: { active?: boolean; payload?: { payload
 }
 
 function GmpChart({ points }: { points: Point[] }) {
+  // A real time axis, not a category one.
+  //
+  // Recharts spaces categories evenly, so a series that skips days — and these
+  // do, whenever a tracker publishes no quote — drew every point the same
+  // distance apart while the date labels jumped by one day here and four there.
+  // The line implied a steady daily march that the dates contradicted. Plotting
+  // against the timestamp makes a gap look like a gap.
+  const data = points.map((p) => ({ ...p, t: Date.parse(`${p.date}T00:00:00Z`) }));
   const values = points.map((p) => p.gmp);
   // Direction over the whole window, which is what the shape is read for.
   const rising = values[values.length - 1] >= values[0];
@@ -86,7 +94,7 @@ function GmpChart({ points }: { points: Point[] }) {
   return (
     <div className="h-44 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={colour} stopOpacity={0.22} />
@@ -96,8 +104,18 @@ function GmpChart({ points }: { points: Point[] }) {
 
           <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
           <XAxis
-            dataKey="date"
-            tickFormatter={formatDate}
+            dataKey="t"
+            type="number"
+            scale="time"
+            // Without an explicit domain a numeric axis pads out to round
+            // numbers, which here are meaningless instants either side of the
+            // series.
+            domain={["dataMin", "dataMax"]}
+            // Ticks on the days that actually have a reading, so every label
+            // corresponds to a point on the line rather than to an interpolated
+            // position between two. minTickGap thins them when they crowd.
+            ticks={data.map((d) => d.t)}
+            tickFormatter={(t: number) => formatDate(new Date(t).toISOString().slice(0, 10))}
             tick={{ fill: "var(--dim)", fontSize: 11 }}
             axisLine={false}
             tickLine={false}
