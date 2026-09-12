@@ -5,13 +5,17 @@
 // not move faster than that). Upserts by (source, slug) and records a GMP
 // history point whenever a value changes.
 
-import { fetchAll } from '../src/gmp/index.js';
+import { fetchAll, applyFallbackGmp } from '../src/gmp/index.js';
 import { upsertMarketIpo, updateMarketMeta, recordSyncRun } from '../src/db/index.js';
 import { logger } from '../src/lib/logger.js';
 
 async function main() {
   try {
     const { records, sources } = await fetchAll();
+
+    // Rows the primary source carries but does not quote a premium for. Values
+    // only -- this never adds an IPO, so it cannot duplicate one.
+    const fallback = await applyFallbackGmp(records);
 
     let inserted = 0;
     let updated = 0;
@@ -59,6 +63,8 @@ async function main() {
       inserted,
       updated,
       details,
+      gmpFilled: fallback.filled,
+      gmpFallback: fallback.id ?? 'off',
       sources: sources.map((s) => `${s.id}:${s.ok ? s.count : 'FAIL'}`).join(','),
     });
     // Non-zero exit only if every source failed -- partial success is success.

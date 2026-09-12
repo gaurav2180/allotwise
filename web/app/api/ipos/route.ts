@@ -184,7 +184,7 @@ export async function GET(request: Request) {
         // Whoever the backend got the row from. `gmp`, `estGainPct` and
         // `estListingPrice` pass through untouched, so the figure, the
         // percentage it implies and the chart below all describe one reading.
-        gmpSource: r.source,
+        gmpSource: r.gmpSource ?? r.source,
         subscription: subs.get(r.slug) ?? null,
         logo: r.logo ?? logos[r.name] ?? null,
         listing: listed

@@ -20,6 +20,71 @@ export const availableSources = Object.values(SOURCES).map((s) => ({
   attribution: s.meta.attribution,
 }));
 
+/** Highest number in a price band — the cap, which applications are priced at. */
+function capPrice(band) {
+  const nums = [...String(band ?? '').replace(/,/g, '').matchAll(/(\d+(?:\.\d+)?)/g)]
+    .map((m) => Number(m[1]))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  return nums.length ? Math.max(...nums) : null;
+}
+
+/**
+ * Fill in a premium for rows the primary source does not quote.
+ *
+ * IPO Ji prints no premium at all for a large share of SME issues -- seven of
+ * nine open SME rows on the afternoon this was written -- and those rows showed
+ * an em dash, which reads as "unknown" whether the truth is "not quoted" or
+ * "quoted at zero". IPO Watch has figures for them.
+ *
+ * Values only, and only onto rows that already exist. The fallback never adds an
+ * IPO, so it cannot reintroduce the duplicates that made this pipeline
+ * single-source: IPO Watch calls one issue "NSE" and IPO Ji "National Stock
+ * Exchange of India", and as a row source that is two IPOs.
+ *
+ * Only the premium itself is borrowed. The percentage and the indicative listing
+ * price are recomputed from *our* price band, because the two trackers disagree
+ * on value where both quote (Maharaja: ₹12 against ₹30) and a row carrying one
+ * source's premium beside another's derived percentage would be arithmetic no
+ * one published. Each row records which tracker its premium came from.
+ */
+export async function applyFallbackGmp(records, injected) {
+  const id = injected ? injected.meta?.id ?? config.gmp.fallbackSource : config.gmp.fallbackSource;
+  const source = injected ?? SOURCES[id];
+  const missing = records.filter((r) => r.gmp === null || r.gmp === undefined);
+  if (!id || !source || !missing.length) return { filled: 0, id: id || null };
+
+  let candidates;
+  try {
+    candidates = await source.fetchGmp();
+  } catch (err) {
+    // A silent fallback is the whole point: the primary rows still stand.
+    logger.warn('gmp fallback unavailable', { source: id, message: err.message });
+    return { filled: 0, id, error: err.message };
+  }
+
+  const { bestMatch } = await import('../lib/ipoMatch.js');
+  const pool = candidates
+    .filter((c) => c.gmp !== null && c.gmp !== undefined)
+    .map((c) => ({ slug: c.slug, name: c.name, gmp: c.gmp }));
+  if (!pool.length) return { filled: 0, id };
+
+  let filled = 0;
+  for (const row of missing) {
+    const hit = bestMatch(row.name, pool);
+    if (!hit) continue;
+    const gmp = pool.find((c) => c.slug === hit.slug)?.gmp;
+    if (gmp === undefined) continue;
+
+    const cap = capPrice(row.priceBand);
+    row.gmp = gmp;
+    row.gmpSource = id;
+    row.estGainPct = cap ? Number(((gmp / cap) * 100).toFixed(2)) : null;
+    row.estListingPrice = cap ? Number((cap + gmp).toFixed(2)) : null;
+    filled++;
+  }
+  return { filled, id };
+}
+
 /** Position in the configured priority order; unconfigured sources sort last. */
 function sourceRank(id) {
   const i = config.gmp.sources.indexOf(id);

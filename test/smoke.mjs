@@ -18,7 +18,7 @@ import { parseDateRange, normalizeStatus, parseRupees, parseEstListing } from '.
 import { parse as parseIpoWatch, parseDetails } from '../src/gmp/ipowatch.js';
 import { parse as parseIpoJiGmp, parseListing, parseDetails as parseIpoJiDetails } from '../src/gmp/ipoji.js';
 const parseIpoJi = Object.assign(parseIpoJiGmp, { listing: parseListing });
-import { mergeBySlug } from '../src/gmp/index.js';
+import { mergeBySlug, applyFallbackGmp } from '../src/gmp/index.js';
 import { nameTokens, matchScore, bestMatch } from '../src/lib/ipoMatch.js';
 import { nseDate, normalizeCategory, parseSubscription } from '../src/market/nse.js';
 
@@ -443,6 +443,66 @@ test('a second GMP source cannot be configured by accident', async () => {
   const single = await run({ GMP_SOURCES: 'ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: '' });
   assert.equal(single.code, 0);
   assert.equal(single.out, 'ipowatch');
+});
+
+test('the GMP fallback fills gaps without ever adding a row', async () => {
+  // IPO Ji prints no premium at all for a large share of SME issues -- seven of
+  // nine open SME rows one afternoon -- so those showed an em dash, which reads
+  // as "unknown" whether the truth is "not quoted" or "quoted at zero".
+  const rows = [
+    { slug: 'quoted', name: 'Quoted Issue', priceBand: '₹100-110', gmp: 20, estGainPct: 18.18, estListingPrice: 130, source: 'ipoji' },
+    { slug: 'silent', name: 'Silent Issue', priceBand: '₹85-90', gmp: null, estGainPct: null, estListingPrice: null, source: 'ipoji' },
+    { slug: 'zero', name: 'Zero Issue', priceBand: '₹70-74', gmp: null, estGainPct: null, estListingPrice: null, source: 'ipoji' },
+    { slug: 'unknown-to-both', name: 'Nobody Quotes This', priceBand: '₹50', gmp: null, estGainPct: null, estListingPrice: null, source: 'ipoji' },
+  ];
+
+  const before = rows.length;
+  const result = await applyFallbackGmp(rows, {
+    // Stands in for the fallback tracker. "NSE" against "National Stock
+    // Exchange of India" is why this may never create rows: as a row source
+    // that pair is two IPOs, and the duplicates are back.
+    fetchGmp: async () => [
+      { slug: 'silent-issue', name: 'Silent Issue', gmp: 7 },
+      { slug: 'zero-issue', name: 'Zero Issue', gmp: 0 },
+      { slug: 'some-other-ipo', name: 'Some Other IPO Entirely', gmp: 99 },
+    ],
+  });
+
+  assert.equal(rows.length, before, 'the fallback must never add an IPO');
+  assert.equal(result.filled, 2);
+
+  // The primary wins wherever it has a figure. The two trackers disagree on
+  // value where both quote (Maharaja: ₹12 against ₹30), so this is not a merge.
+  assert.equal(rows[0].gmp, 20);
+  assert.equal(rows[0].estGainPct, 18.18);
+
+  // A borrowed premium, with the percentage recomputed against OUR band rather
+  // than carried over -- ₹7 on a ₹90 cap is 7.78%, whatever the other site says.
+  assert.equal(rows[1].gmp, 7);
+  assert.equal(rows[1].estGainPct, 7.78);
+  assert.equal(rows[1].estListingPrice, 97);
+  assert.equal(rows[1].gmpSource, 'ipowatch');
+
+  // Zero is a real quote: "no premium", which is not the same as "not quoted".
+  assert.equal(rows[2].gmp, 0);
+  assert.equal(rows[2].estGainPct, 0);
+  assert.equal(rows[2].gmpSource, 'ipowatch');
+
+  // No match, no invention.
+  assert.equal(rows[3].gmp, null);
+  assert.equal(rows[3].gmpSource, undefined);
+});
+
+test('the GMP fallback keeps the rows when the fallback source is down', async () => {
+  const rows = [{ slug: 'a', name: 'Alpha Issue', priceBand: '₹10', gmp: null, source: 'ipoji' }];
+  const result = await applyFallbackGmp(rows, {
+    fetchGmp: async () => {
+      throw new Error('upstream down');
+    },
+  });
+  assert.equal(result.filled, 0);
+  assert.equal(rows.length, 1, 'a failed fallback must not cost the primary rows');
+  assert.equal(rows[0].gmp, null);
 });
 
 test('mergeBySlug collapses per-source rows without mixing one quote with another', () => {

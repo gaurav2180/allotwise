@@ -24,6 +24,7 @@ const MARKET_EXTRA_COLUMNS = {
   listing_date: 'TEXT',
   logo_url: 'TEXT',
   listing_price: 'REAL',
+  gmp_source: 'TEXT',
   details_updated_at: 'TEXT',
 };
 
@@ -166,12 +167,12 @@ export function upsertMarketIpo(rec) {
       `UPDATE market_ipos SET
          name = ?, board = ?, gmp = ?, gmp_trend = ?, price_band = ?,
          est_listing_price = ?, est_gain_pct = ?, open_date = ?, close_date = ?,
-         status = ?, source_updated_at = ?, last_seen_at = datetime('now')
+         status = ?, source_updated_at = ?, gmp_source = ?, last_seen_at = datetime('now')
        WHERE id = ?`
     ).run(
       rec.name, rec.board, rec.gmp ?? null, rec.gmpTrend ?? null, rec.priceBand ?? null,
       rec.estListingPrice ?? null, rec.estGainPct ?? null, rec.openDate ?? null, rec.closeDate ?? null,
-      rec.status, rec.sourceUpdatedAt ?? null, existing.id
+      rec.status, rec.sourceUpdatedAt ?? null, rec.gmpSource ?? rec.source, existing.id
     );
     const changed = (existing.gmp ?? null) !== (rec.gmp ?? null);
     if (changed) recordGmpHistory(rec.source, rec.slug, rec.gmp ?? null);
@@ -181,12 +182,13 @@ export function upsertMarketIpo(rec) {
   d.prepare(
     `INSERT INTO market_ipos
        (source, slug, name, board, gmp, gmp_trend, price_band, est_listing_price,
-        est_gain_pct, open_date, close_date, status, source_updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        est_gain_pct, open_date, close_date, status, source_updated_at, gmp_source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     rec.source, rec.slug, rec.name, rec.board, rec.gmp ?? null, rec.gmpTrend ?? null,
     rec.priceBand ?? null, rec.estListingPrice ?? null, rec.estGainPct ?? null,
-    rec.openDate ?? null, rec.closeDate ?? null, rec.status, rec.sourceUpdatedAt ?? null
+    rec.openDate ?? null, rec.closeDate ?? null, rec.status, rec.sourceUpdatedAt ?? null,
+    rec.gmpSource ?? rec.source
   );
   recordGmpHistory(rec.source, rec.slug, rec.gmp ?? null);
   return { action: 'inserted' };
@@ -225,6 +227,9 @@ const marketRowToApi = (r) => ({
   listingDate: r.listing_date ?? null,
   logo: r.logo_url ?? null,
   listingPrice: r.listing_price ?? null,
+  // Which tracker THIS row's premium came from. Usually the row's own source;
+  // different when the fallback supplied a premium the primary did not quote.
+  gmpSource: r.gmp_source ?? r.source,
 });
 
 // Patch metadata/detail fields on the primary market row for a slug. Only the

@@ -62,6 +62,17 @@ export const config = {
     // tell they are one company. Deduplication after the fact cannot close that;
     // only not creating the duplicate can. Adding a second source here brings
     // the problem back, and `mergeBySlug` will catch only the easy cases.
+    // Fills in a premium the primary source does not quote. Values only: it is
+    // matched onto rows that already exist and can never create one, so it
+    // cannot reintroduce the duplicates that made this a single-source
+    // pipeline. Set empty to disable.
+    //
+    // Needed because IPO Ji prints no premium at all for a good share of SME
+    // issues -- 7 of 9 open SME rows on one afternoon -- while IPO Watch quotes
+    // them. The two disagree on value where both have one (Maharaja: ₹12
+    // against ₹30), which is why the primary always wins and this only speaks
+    // when the primary is silent.
+    fallbackSource: str(process.env.GMP_FALLBACK_SOURCE, 'ipowatch'),
     sources: str(process.env.GMP_SOURCES, 'ipoji')
       .split(',')
       .map((s) => s.trim())

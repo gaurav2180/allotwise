@@ -22,6 +22,9 @@ export const calendarRowSchema = z.object({
   estListingPrice: z.number().nullable(),
   estGainPct: z.number().nullable(),
   source: z.string(),
+  // Which tracker THIS row's premium came from. Usually `source`; different
+  // when the fallback supplied a premium the primary source did not quote.
+  gmpSource: z.string().nullable().default(null),
   // The source states the company's logo alongside the issue, so this is the
   // one that needs no guessing. Defaulted rather than required: a backend that
   // predates the field still parses.

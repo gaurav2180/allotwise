@@ -59,6 +59,9 @@ marketRouter.get('/calendar', (req, res, next) => {
           estListingPrice: i.estListingPrice,
           estGainPct: i.estGainPct,
           source: i.source,
+          // Which tracker this row's premium came from — the row's own source
+          // unless the fallback supplied one the primary did not quote.
+          gmpSource: i.gmpSource,
           logo: i.logo,
           listingPrice: i.listingPrice,
           allotment: link ? { available: true, ipo: link.registrar_slug } : { available: false },
