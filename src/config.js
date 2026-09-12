@@ -62,17 +62,29 @@ export const config = {
     // tell they are one company. Deduplication after the fact cannot close that;
     // only not creating the duplicate can. Adding a second source here brings
     // the problem back, and `mergeBySlug` will catch only the easy cases.
-    // Fills in a premium the primary source does not quote. Values only: it is
-    // matched onto rows that already exist and can never create one, so it
-    // cannot reintroduce the duplicates that made this a single-source
-    // pipeline. Set empty to disable.
+    // Ordered chain of sources that fill in a premium the primary does not
+    // quote. Tried left to right; the first with a figure for that issue wins,
+    // and one being down or not carrying the issue just moves on to the next.
+    //
+    // Values only: matched onto rows that already exist, never creating one, so
+    // no number of entries here can reintroduce the duplicates that made this a
+    // single-source pipeline. That is what makes a chain safe where a second
+    // *row* source is not. Set empty to disable.
     //
     // Needed because IPO Ji prints no premium at all for a good share of SME
     // issues -- 7 of 9 open SME rows on one afternoon -- while IPO Watch quotes
     // them. The two disagree on value where both have one (Maharaja: ₹12
     // against ₹30), which is why the primary always wins and this only speaks
     // when the primary is silent.
-    fallbackSource: str(process.env.GMP_FALLBACK_SOURCE, 'ipowatch'),
+    //
+    // Adding an alternative is one entry in the SOURCES registry plus its name
+    // here. Two candidates were rejected on inspection rather than taste:
+    // InvestorGain serves its table from Next.js payload chunks and IPO Bazar
+    // renders GMP client-side, so neither can be read from the HTML at all.
+    fallbackSources: str(process.env.GMP_FALLBACK_SOURCES, 'ipowatch')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
     sources: str(process.env.GMP_SOURCES, 'ipoji')
       .split(',')
       .map((s) => s.trim())

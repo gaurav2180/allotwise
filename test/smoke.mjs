@@ -461,6 +461,7 @@ test('the GMP fallback fills gaps without ever adding a row', async () => {
     // Stands in for the fallback tracker. "NSE" against "National Stock
     // Exchange of India" is why this may never create rows: as a row source
     // that pair is two IPOs, and the duplicates are back.
+    meta: { id: 'ipowatch' },
     fetchGmp: async () => [
       { slug: 'silent-issue', name: 'Silent Issue', gmp: 7 },
       { slug: 'zero-issue', name: 'Zero Issue', gmp: 0 },
@@ -503,6 +504,72 @@ test('the GMP fallback keeps the rows when the fallback source is down', async (
   assert.equal(result.filled, 0);
   assert.equal(rows.length, 1, 'a failed fallback must not cost the primary rows');
   assert.equal(rows[0].gmp, null);
+});
+
+test('every row a fallback fills is arithmetically self-consistent', async () => {
+  // Whichever tracker the premium comes from, the percentage and the indicative
+  // listing price on that row are computed from OUR band — so the three figures
+  // always agree with each other, which is what a reader actually checks.
+  const rows = [
+    { slug: 'a', name: 'Alpha Issue', priceBand: '₹85-90', gmp: null, source: 'ipoji' },
+    { slug: 'b', name: 'Beta Issue', priceBand: '₹71 to ₹75 Per Share', gmp: null, source: 'ipoji' },
+    { slug: 'c', name: 'Gamma Issue', priceBand: '₹1,700-1,785', gmp: null, source: 'ipoji' },
+    // No band announced yet: a premium can still be shown, but no percentage
+    // can be derived from nothing, and none is invented.
+    { slug: 'd', name: 'Delta Issue', priceBand: null, gmp: null, source: 'ipoji' },
+  ];
+
+  await applyFallbackGmp(rows, {
+    fetchGmp: async () => [
+      { slug: 'alpha', name: 'Alpha Issue', gmp: 7 },
+      { slug: 'beta', name: 'Beta Issue', gmp: 10 },
+      { slug: 'gamma', name: 'Gamma Issue', gmp: 208 },
+      { slug: 'delta', name: 'Delta Issue', gmp: 5 },
+    ],
+  });
+
+  for (const row of rows.slice(0, 3)) {
+    const cap = Math.max(
+      ...String(row.priceBand).replace(/,/g, '').match(/\d+(?:\.\d+)?/g).map(Number)
+    );
+    assert.equal(row.estGainPct, Number(((row.gmp / cap) * 100).toFixed(2)), row.slug);
+    assert.equal(row.estListingPrice, cap + row.gmp, row.slug);
+  }
+  assert.equal(rows[1].estGainPct, 13.33, 'commas and "Per Share" must not break the cap');
+  assert.equal(rows[2].estGainPct, 11.65);
+
+  assert.equal(rows[3].gmp, 5);
+  assert.equal(rows[3].estGainPct, null, 'no band, so no percentage rather than a wrong one');
+  assert.equal(rows[3].estListingPrice, null);
+});
+
+test('the GMP fallback chain moves on when a link is down or has no figure', async () => {
+  const rows = [
+    { slug: 'a', name: 'Alpha Issue', priceBand: '₹100', gmp: null, source: 'ipoji' },
+    { slug: 'b', name: 'Beta Issue', priceBand: '₹100', gmp: null, source: 'ipoji' },
+  ];
+
+  const down = { meta: { id: 'down' }, fetchGmp: async () => { throw new Error('502'); } };
+  const partial = {
+    meta: { id: 'partial' },
+    fetchGmp: async () => [{ slug: 'alpha', name: 'Alpha Issue', gmp: 4 }],
+  };
+  const last = {
+    meta: { id: 'last' },
+    // Would overwrite Alpha too if the chain re-offered filled rows, which it
+    // must not: the first link with a figure wins.
+    fetchGmp: async () => [
+      { slug: 'alpha', name: 'Alpha Issue', gmp: 99 },
+      { slug: 'beta', name: 'Beta Issue', gmp: 6 },
+    ],
+  };
+
+  for (const source of [down, partial, last]) await applyFallbackGmp(rows, source);
+
+  assert.equal(rows[0].gmp, 4, 'the first link with a figure wins');
+  assert.equal(rows[0].gmpSource, 'partial');
+  assert.equal(rows[1].gmp, 6, 'a later link covers what the earlier one missed');
+  assert.equal(rows[1].gmpSource, 'last');
 });
 
 test('mergeBySlug collapses per-source rows without mixing one quote with another', () => {

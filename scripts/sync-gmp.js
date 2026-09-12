@@ -64,7 +64,7 @@ async function main() {
       updated,
       details,
       gmpFilled: fallback.filled,
-      gmpFallback: fallback.id ?? 'off',
+      gmpFallback: Object.entries(fallback.byId).map(([k, v]) => `${k}:${v}`).join(',') || 'none',
       sources: sources.map((s) => `${s.id}:${s.ok ? s.count : 'FAIL'}`).join(','),
     });
     // Non-zero exit only if every source failed -- partial success is success.

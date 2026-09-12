@@ -2,6 +2,7 @@ import * as ipowatch from './ipowatch.js';
 import * as ipoji from './ipoji.js';
 import { config } from '../config.js';
 import { logger } from '../lib/logger.js';
+import { bestMatch } from '../lib/ipoMatch.js';
 
 // GMP source registry. Adding a source is one entry here plus a module exposing
 // { meta, fetchGmp }. The list of major GMP sites offers no clean JSON API, so
@@ -48,41 +49,58 @@ function capPrice(band) {
  * one published. Each row records which tracker its premium came from.
  */
 export async function applyFallbackGmp(records, injected) {
-  const id = injected ? injected.meta?.id ?? config.gmp.fallbackSource : config.gmp.fallbackSource;
-  const source = injected ?? SOURCES[id];
-  const missing = records.filter((r) => r.gmp === null || r.gmp === undefined);
-  if (!id || !source || !missing.length) return { filled: 0, id: id || null };
+  const chain = injected
+    ? [{ id: injected.meta?.id ?? 'injected', source: injected }]
+    : config.gmp.fallbackSources.filter((id) => SOURCES[id]).map((id) => ({ id, source: SOURCES[id] }));
 
-  let candidates;
-  try {
-    candidates = await source.fetchGmp();
-  } catch (err) {
-    // A silent fallback is the whole point: the primary rows still stand.
-    logger.warn('gmp fallback unavailable', { source: id, message: err.message });
-    return { filled: 0, id, error: err.message };
-  }
-
-  const { bestMatch } = await import('../lib/ipoMatch.js');
-  const pool = candidates
-    .filter((c) => c.gmp !== null && c.gmp !== undefined)
-    .map((c) => ({ slug: c.slug, name: c.name, gmp: c.gmp }));
-  if (!pool.length) return { filled: 0, id };
-
+  const byId = {};
   let filled = 0;
-  for (const row of missing) {
-    const hit = bestMatch(row.name, pool);
-    if (!hit) continue;
-    const gmp = pool.find((c) => c.slug === hit.slug)?.gmp;
-    if (gmp === undefined) continue;
 
-    const cap = capPrice(row.priceBand);
-    row.gmp = gmp;
-    row.gmpSource = id;
-    row.estGainPct = cap ? Number(((gmp / cap) * 100).toFixed(2)) : null;
-    row.estListingPrice = cap ? Number((cap + gmp).toFixed(2)) : null;
-    filled++;
+  for (const { id, source } of chain) {
+    // Recomputed each pass: earlier links in the chain have already filled what
+    // they could, so a later one is only asked about what is still missing --
+    // and is skipped entirely once nothing is.
+    const missing = records.filter((r) => r.gmp === null || r.gmp === undefined);
+    if (!missing.length) break;
+
+    let candidates;
+    try {
+      candidates = await source.fetchGmp();
+    } catch (err) {
+      // One link being down must not stop the next, and must not cost the
+      // primary rows anything.
+      logger.warn('gmp fallback unavailable', { source: id, message: err.message });
+      continue;
+    }
+
+    const pool = candidates
+      .filter((c) => c.gmp !== null && c.gmp !== undefined)
+      .map((c) => ({ slug: c.slug, name: c.name, gmp: c.gmp }));
+    if (!pool.length) continue;
+
+    let fromThis = 0;
+    for (const row of missing) {
+      const hit = bestMatch(row.name, pool);
+      if (!hit) continue;
+      const gmp = pool.find((c) => c.slug === hit.slug)?.gmp;
+      if (gmp === undefined) continue;
+
+      // Only the premium is borrowed. The percentage and the indicative listing
+      // price are recomputed from OUR band, so the three figures on a row are
+      // always arithmetically consistent with each other whichever tracker the
+      // premium came from.
+      const cap = capPrice(row.priceBand);
+      row.gmp = gmp;
+      row.gmpSource = id;
+      row.estGainPct = cap ? Number(((gmp / cap) * 100).toFixed(2)) : null;
+      row.estListingPrice = cap ? Number((cap + gmp).toFixed(2)) : null;
+      fromThis++;
+    }
+    if (fromThis) byId[id] = fromThis;
+    filled += fromThis;
   }
-  return { filled, id };
+
+  return { filled, byId, chain: chain.map((c) => c.id) };
 }
 
 /** Position in the configured priority order; unconfigured sources sort last. */
