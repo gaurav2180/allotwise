@@ -54,11 +54,15 @@ export const config = {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
     ),
     timeoutMs: num(process.env.GMP_TIMEOUT_MS, 20000),
-    // Sources to pull, comma-separated. Order is priority when the same IPO
-    // appears in more than one. IPO Ji leads because IPO Watch has proven
-    // unreliable -- timeouts in production, Cloudflare 522s elsewhere -- and a
-    // frozen GMP table is worse than a second-choice one.
-    sources: str(process.env.GMP_SOURCES, 'ipoji,ipowatch')
+    // Sources to pull, comma-separated. Deliberately ONE by default.
+    //
+    // Two trackers meant the same IPO appearing twice whenever they named it
+    // differently -- "NSE" and "National Stock Exchange of India" share no slug
+    // and no name token, so neither slug matching nor the fuzzy name matcher can
+    // tell they are one company. Deduplication after the fact cannot close that;
+    // only not creating the duplicate can. Adding a second source here brings
+    // the problem back, and `mergeBySlug` will catch only the easy cases.
+    sources: str(process.env.GMP_SOURCES, 'ipoji')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),

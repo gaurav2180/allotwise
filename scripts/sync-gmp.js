@@ -6,7 +6,7 @@
 // history point whenever a value changes.
 
 import { fetchAll } from '../src/gmp/index.js';
-import { upsertMarketIpo, recordSyncRun } from '../src/db/index.js';
+import { upsertMarketIpo, updateMarketMeta, recordSyncRun } from '../src/db/index.js';
 import { logger } from '../src/lib/logger.js';
 
 async function main() {
@@ -15,10 +15,21 @@ async function main() {
 
     let inserted = 0;
     let updated = 0;
+    let details = 0;
     for (const rec of records) {
       const { action } = upsertMarketIpo(rec);
       if (action === 'inserted') inserted++;
       else if (action === 'updated') updated++;
+
+      // IPO Ji's calendar cards already state the issue size and lot size, so
+      // take them here rather than making the metadata sync fetch a detail page
+      // per issue for facts we have just been handed. That sync still runs --
+      // it covers the allotment and listing dates, which the cards omit -- but
+      // only for the issues anyone is waiting on.
+      if (rec.issueSize || rec.lotSize) {
+        updateMarketMeta(rec.slug, { issueSize: rec.issueSize, lotSize: rec.lotSize });
+        details++;
+      }
     }
 
     for (const s of sources) {
@@ -37,6 +48,7 @@ async function main() {
       seen: records.length,
       inserted,
       updated,
+      details,
       sources: sources.map((s) => `${s.id}:${s.ok ? s.count : 'FAIL'}`).join(','),
     });
     // Non-zero exit only if every source failed -- partial success is success.

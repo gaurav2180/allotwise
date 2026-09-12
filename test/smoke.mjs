@@ -15,7 +15,8 @@ import { parseCompanies } from '../src/registrars/bigshare.js';
 import { getRegistrar, supportedRegistrars } from '../src/registrars/index.js';
 import { parseDateRange, normalizeStatus, parseRupees, parseEstListing } from '../src/lib/marketDates.js';
 import { parse as parseIpoWatch, parseDetails } from '../src/gmp/ipowatch.js';
-import { parse as parseIpoJi, parseDetails as parseIpoJiDetails } from '../src/gmp/ipoji.js';
+import { parse as parseIpoJiGmp, parseListing, parseDetails as parseIpoJiDetails } from '../src/gmp/ipoji.js';
+const parseIpoJi = Object.assign(parseIpoJiGmp, { listing: parseListing });
 import { mergeBySlug } from '../src/gmp/index.js';
 import { nameTokens, matchScore, bestMatch } from '../src/lib/ipoMatch.js';
 import { nseDate, normalizeCategory, parseSubscription } from '../src/market/nse.js';
@@ -305,6 +306,66 @@ test('ipoji.parseDetails prefers the fact list and falls back to the timeline', 
       .minInvestment,
     null
   );
+});
+
+test('ipoji.parseListing reads the calendar cards and derives status from the dates', () => {
+  const card = (slug, name, open, close, status, board, price, lot, size, premium) => `
+    <article class="card ipo-card" data-agent-href="/ipo/${slug}" data-ipo-status="${status}" data-ipo-board="${board}">
+      <h3 class="ipo-card-name" title="${name} Limited IPO">${name}</h3>
+      <div class="ipo-card-date"><time datetime="${open}">x</time> – <time datetime="${close}">y</time></div>
+      <div><span class="ipo-card-secondary-label">Offer Price</span><span class="ipo-card-body-value">${price}</span></div>
+      <div><span class="ipo-card-secondary-label">Lot Size</span><span class="ipo-card-body-value">${lot}</span></div>
+      <div><span class="ipo-card-secondary-label">Issue Size</span><span class="ipo-card-body-value">${size}</span></div>
+      <div><span class="ipo-card-secondary-label">Exp. Premium</span><span class="ipo-card-body-value">${premium}</span></div>
+    </article>`;
+
+  const html =
+    card('national-stock-exchange-of-india-ipo', 'National Stock Exchange of India', '2026-09-17', '2026-09-21',
+         'current', 'mainboard', '₹1700-1785', '8', '₹22561.57 Cr', '₹208 <small>(12%)</small>') +
+    card('open-one-ipo', 'Open One', '2026-09-10', '2026-09-14', 'current', 'sme', '₹56-59', '2000', '₹26.93 Cr', '—') +
+    card('gone-by-ipo', 'Gone By', '2026-09-01', '2026-09-03', 'listed', 'sme', '₹87-92', '1600', '₹45 Cr', '-₹6 (-7%)');
+
+  const [nse, open, listed] = parseIpoJi.listing(html, { ref: new Date('2026-09-12T00:00:00Z') });
+
+  assert.equal(nse.slug, 'national-stock-exchange-of-india');
+  assert.equal(nse.board, 'mainboard');
+  assert.equal(nse.openDate, '2026-09-17');
+  assert.equal(nse.closeDate, '2026-09-21');
+  assert.equal(nse.priceBand, '₹1700-1785', 'the full band, not just the cap price');
+  assert.equal(nse.issueSize, '₹22561.57 Cr');
+  assert.equal(nse.lotSize, 8);
+  assert.equal(nse.gmp, 208);
+  assert.equal(nse.estGainPct, 12);
+  // The card says "current" for anything not yet listed, so open vs upcoming
+  // comes from the dates instead.
+  assert.equal(nse.status, 'upcoming', 'opens in five days');
+  assert.equal(open.status, 'open', 'reference date sits inside the window');
+  assert.equal(listed.status, 'listed', 'the one status the dates cannot give');
+
+  // An em dash is "not quoted yet", which is not a premium of zero.
+  assert.equal(open.gmp, null);
+  // A discount is a real, negative premium.
+  assert.equal(listed.gmp, -6);
+  assert.equal(listed.estGainPct, -7);
+});
+
+test('a second GMP source is what puts an IPO in the list twice', () => {
+  // The bug in one assertion. IPO Watch called this issue "NSE"; IPO Ji calls it
+  // "National Stock Exchange of India". They are the same company and they share
+  // no slug and no name token, so nothing downstream can reconcile them --
+  // mergeBySlug keys on the slug, and the fuzzy matcher used for registrar links
+  // scores this pair at zero. The only fix is not to have two sources.
+  assert.notEqual(slugify('NSE'), slugify('National Stock Exchange of India'));
+  assert.equal(matchScore('NSE', 'National Stock Exchange of India'), 0);
+
+  const rows = [
+    { slug: 'nse', source: 'ipowatch', name: 'NSE', gmp: 218 },
+    { slug: 'national-stock-exchange-of-india', source: 'ipoji', name: 'National Stock Exchange of India', gmp: 208 },
+  ];
+  assert.equal(mergeBySlug(rows).length, 2, 'deduplication cannot save a two-source setup');
+
+  // Which is why the default is a single source.
+  assert.deepEqual(config.gmp.sources, ['ipoji']);
 });
 
 test('mergeBySlug collapses per-source rows without mixing one quote with another', () => {

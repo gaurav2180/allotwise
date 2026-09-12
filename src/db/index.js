@@ -38,6 +38,19 @@ function ensureMarketColumns(d) {
 // not reached keeps the wrong value indefinitely. Clearing it makes the row show
 // a dash until a real amount arrives, which is the honest state. Idempotent: a
 // value with no rupee or crore/lakh marker is by definition not an amount.
+// Rows from a source that is no longer configured. Dropping a source from
+// GMP_SOURCES stops new rows arriving but leaves the old ones sitting in the
+// table, and they keep showing up in the list -- which is exactly the duplicate
+// the single-source decision was meant to end, surviving the decision. Nothing
+// here is anyone's data: every row is rebuilt from the live source on the next
+// sync, so removing a stale one costs a few minutes of staleness at worst.
+function dropUnconfiguredSources(d) {
+  const wanted = config.gmp.sources;
+  if (!wanted.length) return; // Misconfiguration; emptying the table is worse.
+  const placeholders = wanted.map(() => '?').join(', ');
+  d.prepare(`DELETE FROM market_ipos WHERE source NOT IN (${placeholders})`).run(...wanted);
+}
+
 function clearShareCountIssueSizes(d) {
   d.exec(`
     UPDATE market_ipos SET issue_size = NULL
@@ -58,6 +71,7 @@ export function getDb() {
   db.exec(readFileSync(resolve(here, 'schema.sql'), 'utf8'));
   ensureMarketColumns(db);
   clearShareCountIssueSizes(db);
+  dropUnconfiguredSources(db);
   return db;
 }
 

@@ -195,30 +195,41 @@ The tracker side (`/calendar`, `/gmp`) is fed by `market_ipos`, populated by
 `{ meta, fetchGmp }` and is isolated: a parse failure in one source is reported
 per-source and never sinks the others (`fetchAll` uses `Promise.allSettled`).
 
-**Sources.** Two, in the priority `GMP_SOURCES` gives (default `ipoji,ipowatch`).
-Neither offers a JSON API, so both are HTML adapters.
+**One source, on purpose.** `GMP_SOURCES` defaults to `ipoji` alone.
 
-- **IPO Ji** (`src/gmp/ipoji.js`) — the primary. Its listing page carries the
-  premium, percentage and indicative price as `data-` attributes and board and
-  status as an explicit vocabulary, so none of it is inferred from heading text
-  or column position; the offer dates are full and unambiguous
-  (`Sep 4, 2026 – Sep 8, 2026`), so there is no year to guess.
-- **IPO Watch** (`src/gmp/ipowatch.js`) — the fallback, and the original source.
-  It still covers issues IPO Ji has not indexed, but it is not dependable enough
-  to lead: every fetch from the deployed host timed out, and the same site
-  answered a home connection with Cloudflare 522s. A frozen GMP table is worse
-  than a second-choice one.
+Running two trackers side by side put the same IPO in the list twice whenever
+they named it differently: IPO Watch called one issue **"NSE"**, IPO Ji called it
+**"National Stock Exchange of India"**. Those share no slug and no name token, so
+`mergeBySlug` (which keys on the slug) cannot see they are one company, and
+neither can the fuzzy name matcher used for registrar links — it scores that pair
+at **zero**. Short of a hand-maintained alias table, deduplicating after the fact
+will always leak. One source cannot disagree with itself.
 
-`market_ipos` keys on `(source, slug)`, so an IPO both sites carry is two rows.
-`mergeBySlug` in `src/gmp/index.js` collapses them for the list endpoints: the
-highest-priority source *that actually quotes a premium* wins, and its quote is
-taken whole — mixing one tracker's premium with another's indicative price would
-produce a number neither published, and they disagree often enough for that to
-show. Only descriptive gaps are filled across sources. `?source=` bypasses the
-merge and returns that source's own rows.
+- **IPO Ji** (`src/gmp/ipoji.js`) reads two pages. `/ipo` is the calendar: every
+  current, upcoming and recently-listed issue as a card with name, ISO
+  `<time datetime>` open/close dates, board, full price band, lot size, issue
+  size and expected premium. `/ipo-gmp` carries just the premium, requoted far
+  more often, and is overlaid on top. Status comes from the dates, because the
+  card's own badge says "current" for both open and closed.
+- **IPO Watch** (`src/gmp/ipowatch.js`) is still in the registry and still
+  parses, so `GMP_SOURCES=ipowatch` works — but it is not enabled. It publishes
+  only the cap price rather than the band, an issue size as a share count, and
+  dates like `28-1 Sept` whose year and month boundary have to be inferred. It
+  also went down for a day: timing out from the deployed host and serving
+  Cloudflare 522s elsewhere.
 
-Adding a third source is one registry entry plus an adapter exposing
-`{ meta, fetchGmp }`.
+Rows from a source no longer listed in `GMP_SOURCES` are **deleted on the next
+start** (`src/db/index.js`). Dropping a source otherwise leaves its rows in
+`market_ipos` and they keep appearing in the list — the duplicate outliving the
+decision to stop creating it. Nothing is lost: every row is rebuilt from the live
+source on the next sync.
+
+`mergeBySlug` in `src/gmp/index.js` still collapses per-source rows for the list
+endpoints, for anyone who does run two. When it fires, the highest-priority
+source *that actually quotes a premium* wins and its quote is taken whole —
+mixing one tracker's premium with another's indicative price would produce a
+number neither published. `?source=` bypasses the merge. Treat it as a safety
+net for the easy cases, not as a reason to add a second source.
 
 **GMP is unofficial** grey-market data. Every record is stamped with `source`
 and the site's own "last updated" text, and every response carries an

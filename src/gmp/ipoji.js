@@ -2,28 +2,40 @@ import { config } from '../config.js';
 import { slugify } from '../lib/validate.js';
 import { normalizeStatus } from '../lib/marketDates.js';
 
-// GMP source adapter for IPO Ji (ipoji.com).
+// GMP + calendar source adapter for IPO Ji (ipoji.com).
 //
-// This exists because IPO Watch, the original source, is not dependable enough
-// to be the only one. In production every fetch hung until it timed out, and
-// the same site answered a home connection with Cloudflare 522s -- its origin
-// was simply down. Either way a single-source pipeline froze the GMP figures
-// and the calendar with it, and no amount of retrying fixes a source that is
-// not answering. IPO Ji has been reachable throughout.
+// Two pages, because they answer different questions:
 //
-// Its listing page is a better parse target than IPO Watch's besides: every row
-// carries the premium, percentage and indicative price as data attributes, and
-// board and status as an explicit vocabulary, so none of it is inferred from
-// heading text or column position. The dates are full and unambiguous
-// ("Sep 4, 2026 - Sep 8, 2026"), so unlike IPO Watch's "28-1 Sept" there is no
-// year to guess and no month-boundary rule to get wrong.
+//   /ipo      the calendar. Every current, upcoming and recently-listed issue as
+//             a card carrying name, ISO open/close dates, board, price band, lot
+//             size, issue size and the expected premium. This is the spine.
+//   /ipo-gmp  the premium only, for issues actively quoted, refreshed far more
+//             often than the cards. Overlaid on top where the two overlap.
+//
+// It is a single source on purpose. Running two trackers side by side produced
+// the same IPO twice in the list whenever they named it differently -- IPO Watch
+// calls one "NSE" and IPO Ji "National Stock Exchange of India" -- and nothing
+// short of a hand-maintained alias table reconciles those: they share no slug
+// and no name token, so neither slug matching nor the fuzzy name matcher used
+// for registrar links can see they are the same company. Deduplicating after the
+// fact was always going to leak. One source cannot disagree with itself.
+//
+// IPO Ji is the one kept because it is both better-formed and more reliable.
+// Dates are real ISO values in `<time datetime>` rather than IPO Watch's
+// "28-1 Sept", which has to have its year and month boundary inferred; price
+// bands are full ranges rather than just the cap; issue size is the published
+// rupee amount rather than a share count. And through the period where IPO Watch
+// was timing out from the deployed host and serving Cloudflare 522s elsewhere,
+// IPO Ji stayed up.
 
 export const meta = {
   id: 'ipoji',
   label: 'IPO Ji',
   url: 'https://www.ipoji.com/ipo-gmp',
-  attribution: 'GMP data via IPO Ji (ipoji.com). Grey market premium is unofficial.',
+  attribution: 'IPO calendar and GMP data via IPO Ji (ipoji.com). Grey market premium is unofficial.',
 };
+
+const CALENDAR_URL = 'https://www.ipoji.com/ipo';
 
 const NAMED_ENTITIES = { amp: '&', nbsp: ' ', lt: '<', gt: '>', quot: '"', ndash: '–', mdash: '—', rupee: '₹' };
 
@@ -77,7 +89,85 @@ function cellByLabel(row, label) {
 }
 
 /**
- * Parse the listing page into the same record shape every GMP source returns.
+ * Parse the `/ipo` calendar cards -- the full set of current, upcoming and
+ * recently-listed issues, and the source of everything except the live premium.
+ */
+export function parseListing(html, { ref = new Date() } = {}) {
+  const records = [];
+  const today = ref.toISOString().slice(0, 10);
+
+  for (const block of html.split(/<article class="[^"]*ipo-card[^"]*"/i).slice(1)) {
+    const card = block.slice(0, block.indexOf('</article>') + 1 || undefined);
+    const attrs = card.slice(0, card.indexOf('>'));
+    const attr = (k) => (attrs.match(new RegExp(`${k}="([^"]*)"`, 'i')) ?? [])[1];
+
+    const name = stripTags((card.match(/<h3[^>]*class="[^"]*ipo-card-name[^"]*"[^>]*>([\s\S]*?)<\/h3>/i) ?? [])[1] ?? '');
+    if (!name) continue;
+
+    // Real ISO values in the markup, so no parsing of display text and no year
+    // to infer. An issue with no dates announced yet simply has none.
+    const times = [...card.matchAll(/<time[^>]*datetime="(\d{4}-\d{2}-\d{2})"/gi)].map((m) => m[1]);
+    const openDate = times[0] ?? null;
+    const closeDate = times[1] ?? times[0] ?? null;
+
+    // Labelled stats, read by label rather than position.
+    const stats = {};
+    for (const m of card.matchAll(
+      /ipo-card-secondary-label[^>]*>([\s\S]*?)<\/span>\s*<span[^>]*ipo-card-body-value[^>]*>([\s\S]*?)<\/span>/gi
+    )) {
+      const value = stripTags(m[2]);
+      // "N/A", "TBA" and an em dash are the page's ways of saying not announced
+      // yet. Stored verbatim they become "₹N/A" on a row, so they are dropped
+      // here and the field is simply absent.
+      if (/^(n\/?a|tba|tbd|—|-)$/i.test(value.replace(/^₹/, '').trim())) continue;
+      stats[stripTags(m[1]).toLowerCase()] = value;
+    }
+
+    // "₹208 (12%)" -- premium and its percentage of the cap price.
+    const premium = stats['exp. premium'] ?? stats['exp premium'] ?? '';
+    const gmpMatch = premium.match(/(-?)\s*₹\s*(\d+(?:\.\d+)?)/);
+    const pctMatch = premium.match(/\(\s*(-?\d+(?:\.\d+)?)\s*%/);
+    const gmp = gmpMatch ? Number(gmpMatch[2]) * (gmpMatch[1] === '-' ? -1 : 1) : null;
+
+    // The card's own status badge conflates open with closed ("current" covers
+    // both), so it is trusted only for `listed`, which the dates cannot tell us.
+    // Everything else follows from the dates, which are exact.
+    let status;
+    if (attr('data-ipo-status') === 'listed') status = 'listed';
+    else if (!openDate) status = 'upcoming';
+    else if (today < openDate) status = 'upcoming';
+    else if (closeDate && today > closeDate) status = 'closed';
+    else status = 'open';
+
+    records.push({
+      name,
+      slug: slugify(name),
+      board: attr('data-ipo-board') === 'sme' ? 'sme' : 'mainboard',
+      gmp,
+      gmpTrend: null,
+      priceBand: stats['offer price'] || null,
+      estListingPrice: null,
+      estGainPct: pctMatch ? Number(pctMatch[1]) : null,
+      openDate,
+      closeDate,
+      status,
+      sourceUpdatedAt: null,
+      source: meta.id,
+      // Carried through to the metadata sync, which would otherwise fetch a
+      // detail page per issue to learn what the card already says.
+      issueSize: stats['issue size'] || null,
+      lotSize: (() => {
+        const n = Number(String(stats['lot size'] ?? '').replace(/[,\s]/g, ''));
+        return Number.isFinite(n) && n > 0 ? n : null;
+      })(),
+    });
+  }
+  return records;
+}
+
+/**
+ * Parse the `/ipo-gmp` table -- the live premium, quoted far more often than the
+ * calendar cards are rebuilt.
  *
  * Rows with `data-hasgmp="false"` are kept: their numeric attributes are zeroed
  * because no premium has been quoted yet, which is not the same as a premium of
@@ -146,21 +236,75 @@ async function fetchHtml(url) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export async function fetchGmp() {
+async function withRetries(fn) {
   let lastErr;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const html = await fetchHtml(meta.url);
-      if (!/gmp-row/.test(html)) {
-        throw new Error(`IPO Ji returned an unexpected body (${html.length} bytes)`);
-      }
-      return parse(html);
+      return await fn();
     } catch (err) {
       lastErr = err;
       if (attempt < 2) await sleep(1500 * (attempt + 1));
     }
   }
   throw lastErr;
+}
+
+/**
+ * Merge the premium quoted on `/ipo-gmp` into a calendar record.
+ *
+ * The two pages carry the same premium at different freshness -- the cards are
+ * rebuilt far less often than the table is requoted -- so the table wins where
+ * both have a figure. It also has the indicative listing price and the "last
+ * updated" stamp, neither of which appears on a card.
+ */
+function applyQuote(record, quote) {
+  if (!quote) return record;
+  return {
+    ...record,
+    gmp: quote.gmp ?? record.gmp,
+    estGainPct: quote.estGainPct ?? record.estGainPct,
+    estListingPrice: quote.estListingPrice ?? record.estListingPrice,
+    sourceUpdatedAt: quote.sourceUpdatedAt ?? record.sourceUpdatedAt,
+    priceBand: record.priceBand ?? quote.priceBand,
+  };
+}
+
+export async function fetchGmp({ ref = new Date() } = {}) {
+  // The calendar is the spine and must succeed; the quote overlay is an
+  // enhancement, so a failure there costs freshness rather than the whole sync.
+  const listing = await withRetries(async () => {
+    const html = await fetchHtml(CALENDAR_URL);
+    if (!/ipo-card/.test(html)) {
+      throw new Error(`IPO Ji calendar returned an unexpected body (${html.length} bytes)`);
+    }
+    const records = parseListing(html, { ref });
+    if (!records.length) throw new Error('IPO Ji calendar parsed to zero issues');
+    return records;
+  });
+
+  let quotes = [];
+  try {
+    quotes = await withRetries(async () => {
+      const html = await fetchHtml(meta.url);
+      if (!/gmp-row/.test(html)) {
+        throw new Error(`IPO Ji returned an unexpected body (${html.length} bytes)`);
+      }
+      return parse(html);
+    });
+  } catch {
+    // Cards still carry a premium, just a staler one.
+  }
+
+  const bySlug = new Map(quotes.map((q) => [q.slug, q]));
+  const merged = listing.map((r) => applyQuote(r, bySlug.get(r.slug)));
+
+  // An issue quoted on the GMP table but absent from the calendar (it drops off
+  // the cards sooner after listing) would otherwise vanish from the tracker
+  // mid-run. Same source, so this cannot duplicate anything.
+  const seenSlugs = new Set(merged.map((r) => r.slug));
+  for (const q of quotes) if (!seenSlugs.has(q.slug)) merged.push(q);
+
+  return merged;
 }
 
 // --- Per-IPO detail page ----------------------------------------------------
