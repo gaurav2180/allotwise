@@ -23,6 +23,7 @@ const MARKET_EXTRA_COLUMNS = {
   refund_date: 'TEXT',
   listing_date: 'TEXT',
   logo_url: 'TEXT',
+  listing_price: 'REAL',
   details_updated_at: 'TEXT',
 };
 
@@ -223,6 +224,7 @@ const marketRowToApi = (r) => ({
   refundDate: r.refund_date ?? null,
   listingDate: r.listing_date ?? null,
   logo: r.logo_url ?? null,
+  listingPrice: r.listing_price ?? null,
 });
 
 // Patch metadata/detail fields on the primary market row for a slug. Only the
@@ -240,6 +242,7 @@ const META_COLUMNS = {
   refundDate: 'refund_date',
   listingDate: 'listing_date',
   logo: 'logo_url',
+  listingPrice: 'listing_price',
 };
 
 export function updateMarketMeta(slug, fields) {

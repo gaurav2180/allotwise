@@ -7,10 +7,28 @@ import { bestMatch } from "@/lib/match";
 import { resolveSubscriptions, type SubscriptionResult } from "@/lib/nse";
 import { resolveIpojiSubscriptions } from "@/lib/ipoji-subscription";
 import { resolveIpojiGmp, type IpojiGmpQuote } from "@/lib/ipoji-gmp";
-import { derivePhase } from "@/lib/utils";
+import { capPrice, derivePhase } from "@/lib/utils";
 import { calendarSchema } from "@/lib/schemas";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
+
+/**
+ * A listing outcome built from the debut price the calendar publishes.
+ *
+ * Applications are priced at the cap, so that is what the gain is measured
+ * against. Null unless both figures are there — an issue that has listed but
+ * whose opening price is not yet published is a real state, and the row shows
+ * "Listed" without a number rather than inventing one.
+ */
+function listingFrom(listingPrice: number | null, priceBand: string | null) {
+  const issuePrice = capPrice(priceBand);
+  if (listingPrice === null || !issuePrice) return null;
+  return {
+    price: listingPrice,
+    issuePrice,
+    gainPct: Number((((listingPrice - issuePrice) / issuePrice) * 100).toFixed(2)),
+  };
+}
 
 type SubsMap = Map<string, SubscriptionResult>;
 
@@ -181,7 +199,12 @@ export async function GET(request: Request) {
         logo: r.logo ?? logos[r.name] ?? null,
         listing: listed
           ? { price: listed.listingPrice, issuePrice: listed.issuePrice, gainPct: listed.gainPct }
-          : null,
+          : // The outcome table covers barely any SME issue, which left listed
+            // SME rows with a stale premium or a dash where a real result
+            // belonged — one of them had listed 20% *down* and said nothing.
+            // The calendar carries the debut price for exactly those, so it
+            // fills in whenever the table has no match.
+            listingFrom(r.listingPrice, r.priceBand),
         // Cache-only: the calendar's own `priceBand` is just the cap price, and
         // fetching 30 detail pages to widen it would cost more than the figure
         // is worth on a cold load. The warmer keeps this hot; until it has run,

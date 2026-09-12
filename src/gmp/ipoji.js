@@ -163,6 +163,21 @@ export function parseListing(html, { ref = new Date() } = {}) {
       // company names -- which is what the frontend had to do without this --
       // left roughly one issue in five on a monogram tile.
       logo: (card.match(/<img[^>]+src="(https:\/\/media\.ipoji\.com\/[^"]+)"/i) ?? [])[1] ?? null,
+      // What the share actually opened at. Once an issue lists, the card drops
+      // "Exp. Premium" and prints "List Price" instead -- which is why listed
+      // rows showed a dash or a stale forecast in the GMP column while the real
+      // outcome, including a 20% loss, went unreported.
+      listingPrice: (() => {
+        const raw = stats['list price'] ?? stats['listing price'];
+        if (!raw) return null;
+        // Mainboard issues list on two exchanges and the value carries which
+        // one: "221.0(NSE)". Stripping punctuation left "221.0NSE" and parsed
+        // as NaN, so those rows silently lost their outcome. Take the leading
+        // number and ignore the rest.
+        const m = String(raw).replace(/[₹,\s]/g, '').match(/^-?\d+(?:\.\d+)?/);
+        const n = m ? Number(m[0]) : NaN;
+        return Number.isFinite(n) && n > 0 ? n : null;
+      })(),
       // Carried through to the metadata sync, which would otherwise fetch a
       // detail page per issue to learn what the card already says.
       issueSize: stats['issue size'] || null,

@@ -368,6 +368,31 @@ test('ipoji.parseListing reads the calendar cards and derives status from the da
   assert.equal(listed.estGainPct, -7);
 });
 
+test('ipoji.parseListing reads the debut price once an issue has listed', () => {
+  // A listed card drops "Exp. Premium" and prints "List Price" instead. Missing
+  // that left listed rows showing a stale forecast or nothing at all -- one had
+  // listed 20% down and the row said nothing.
+  const card = (name, listPrice) => `
+    <article class="card ipo-card" data-agent-href="/ipo/${name}-ipo" data-ipo-status="listed" data-ipo-board="sme">
+      <h3 class="ipo-card-name">${name}</h3>
+      <div><time datetime="2026-09-01">x</time> <time datetime="2026-09-03">y</time></div>
+      <div><span class="ipo-card-secondary-label">Offer Price</span><span class="ipo-card-body-value">₹102</span></div>
+      <div><span class="ipo-card-secondary-label">List Price</span><span class="ipo-card-body-value">${listPrice}</span></div>
+    </article>`;
+
+  assert.equal(parseIpoJi.listing(card('Fly Hi', '81.6'))[0].listingPrice, 81.6);
+
+  // Mainboard lists on two exchanges and the value says which: "221.0(NSE)".
+  // Stripping punctuation gave "221.0NSE", which parsed as NaN and silently
+  // dropped the outcome for exactly those issues.
+  assert.equal(parseIpoJi.listing(card('Deepa', '221.0(NSE)'))[0].listingPrice, 221);
+  assert.equal(parseIpoJi.listing(card('Rays', '₹239.0 (BSE)'))[0].listingPrice, 239);
+
+  // Listed but the debut price not published yet is a real state, not a zero.
+  assert.equal(parseIpoJi.listing(card('Pending', '—'))[0].listingPrice, null);
+  assert.equal(parseIpoJi.listing(card('Pending', 'N/A'))[0].listingPrice, null);
+});
+
 test('a second GMP source is what puts an IPO in the list twice', () => {
   // The bug in one assertion. IPO Watch called this issue "NSE"; IPO Ji calls it
   // "National Stock Exchange of India". They are the same company and they share

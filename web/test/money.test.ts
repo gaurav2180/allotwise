@@ -61,3 +61,28 @@ describe("issue size and price band stay the published figures", () => {
     expect(formatPriceBand("₹104")).toBe("₹104");
   });
 });
+
+describe("listing outcome supersedes the forecast", () => {
+  // Mirrors listingFrom in app/api/ipos/route.ts: applications are priced at the
+  // cap, so that is what a debut price is measured against.
+  const gain = (listingPrice: number, band: string) => {
+    const issuePrice = capPrice(band)!;
+    return Number((((listingPrice - issuePrice) / issuePrice) * 100).toFixed(2));
+  };
+
+  it("reports the real result, including a loss", () => {
+    // Every one of these was showing a stale premium or a dash.
+    expect(gain(81.6, "₹102")).toBe(-20);
+    expect(gain(224.9, "₹120-127")).toBe(77.09);
+    expect(gain(112.1, "₹59")).toBe(90);
+    expect(gain(56, "₹51-54")).toBe(3.7);
+    expect(gain(221, "₹168-177")).toBe(24.86);
+    expect(gain(239, "₹227-239")).toBe(0);
+  });
+
+  it("measures against the cap, not the floor", () => {
+    // Against the floor this would read +9.4%, which is not what an applicant
+    // paid: allocations are made at the cap.
+    expect(gain(140, "₹87-92")).toBe(52.17);
+  });
+});

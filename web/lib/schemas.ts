@@ -26,6 +26,9 @@ export const calendarRowSchema = z.object({
   // one that needs no guessing. Defaulted rather than required: a backend that
   // predates the field still parses.
   logo: z.string().nullable().default(null),
+  // What the share actually opened at. Present only after listing, and the
+  // figure that supersedes the premium once it is.
+  listingPrice: z.number().nullable().default(null),
   allotment: z.object({
     available: z.boolean(),
     // Present only when available — and it is the REGISTRAR slug, which differs

@@ -26,10 +26,13 @@ async function main() {
       // per issue for facts we have just been handed. That sync still runs --
       // it covers the allotment and listing dates, which the cards omit -- but
       // only for the issues anyone is waiting on.
-      if (rec.issueSize || rec.lotSize || rec.logo) {
+      if (rec.issueSize || rec.lotSize || rec.logo || rec.listingPrice) {
         updateMarketMeta(rec.slug, {
           issueSize: rec.issueSize,
           lotSize: rec.lotSize,
+          // What the share opened at. Known only after listing, and the figure
+          // that supersedes every forecast once it is.
+          listingPrice: rec.listingPrice,
           // The card names the company's logo outright. The frontend previously
           // had to guess it, fuzzy-matching image filenames against company
           // names, which left about one issue in five on a monogram tile.
