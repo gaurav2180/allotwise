@@ -90,10 +90,13 @@ export const config = {
       .map((s) => s.trim())
       .filter(Boolean),
     // Max detail pages to fetch per metadata sync. Only upcoming/open IPOs need
-    // fresh details, but 12 stopped covering them once the calendar grew past
-    // 30 rows -- issues left outside the window keep whatever they were last
-    // given, which is usually nothing. At 1.2s between pages this is ~30s.
-    detailFetchLimit: num(process.env.GMP_DETAIL_FETCH_LIMIT, 24),
+    // fresh details, but the window has to cover all of them: an issue left
+    // outside it keeps whatever it was last given, which is usually nothing,
+    // and the detail page is the only source of the published minimum
+    // application the estimated gain is built on. 24 covered 39 candidates,
+    // which is how four open issues ended up showing a dash. At 1.2s between
+    // pages, 40 is about 48s of a sync that runs hourly.
+    detailFetchLimit: num(process.env.GMP_DETAIL_FETCH_LIMIT, 40),
   },
 
   nse: {
