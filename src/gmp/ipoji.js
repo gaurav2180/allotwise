@@ -109,6 +109,28 @@ export function parseListing(html, { ref = new Date() } = {}) {
     const name = stripTags((card.match(/<h3[^>]*class="[^"]*ipo-card-name[^"]*"[^>]*>([\s\S]*?)<\/h3>/i) ?? [])[1] ?? '');
     if (!name) continue;
 
+    // Board comes from the exchange badge, not `data-ipo-board`.
+    //
+    // That attribute is wrong on this source: it reads "sme" for eight issues
+    // whose own badge says "BSE, NSE" -- PhonePe, SK Finance, Credila, InCred,
+    // Avanse, IndiaFirst, Prestige Hospitality and Veritas Finance, every one a
+    // mainboard issue, several of them multi-thousand-crore. The badge is the
+    // exchange the issue actually lists on and is consistent: "BSE SME" and
+    // "NSE SME" for SME, "Mainboard" or a plain exchange list otherwise.
+    //
+    // This matters beyond a label. Board drives the Mainboard/SME filter, and
+    // an SME issue has a two-lot minimum application where mainboard has one,
+    // so a misfiled row misstates the money as well as the category.
+    const badge = stripTags((card.match(/data-ipotype="([^"]*)"/i) ?? [])[1] ?? '');
+    const board = /\bsme\b/i.test(badge)
+      ? 'sme'
+      : badge
+        ? 'mainboard'
+        : // No badge at all: fall back to the attribute rather than guessing.
+          attr('data-ipo-board') === 'sme'
+          ? 'sme'
+          : 'mainboard';
+
     // Real ISO values in the markup, so no parsing of display text and no year
     // to infer. An issue with no dates announced yet simply has none.
     const times = [...card.matchAll(/<time[^>]*datetime="(\d{4}-\d{2}-\d{2})"/gi)].map((m) => m[1]);
@@ -147,7 +169,7 @@ export function parseListing(html, { ref = new Date() } = {}) {
     records.push({
       name,
       slug: slugify(name),
-      board: attr('data-ipo-board') === 'sme' ? 'sme' : 'mainboard',
+      board,
       gmp,
       gmpTrend: null,
       priceBand: stats['offer price'] || null,

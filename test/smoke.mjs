@@ -407,6 +407,40 @@ test('ipoji.parseListing reads the calendar cards and derives status from the da
   assert.equal(listed.estGainPct, -7);
 });
 
+test('board comes from the exchange badge, not the board attribute', () => {
+  // The source's own `data-ipo-board` says "sme" for eight mainboard issues --
+  // PhonePe, SK Finance, Credila, InCred, Avanse, IndiaFirst, Prestige
+  // Hospitality, Veritas Finance -- while their badge correctly reads
+  // "BSE, NSE". Believing the attribute filed multi-thousand-crore mainboard
+  // IPOs under SME, which is both the wrong filter and the wrong minimum
+  // application (two lots on SME against one on mainboard).
+  const card = (name, attrBoard, badge) => `
+    <article class="card ipo-card" data-agent-href="/ipo/${name}-ipo" data-ipo-status="upcoming" data-ipo-board="${attrBoard}">
+      <h3 class="ipo-card-name">${name}</h3>
+      <span class="ipo-card-market-badge" data-ipotype="${badge}">${badge}</span>
+    </article>`;
+
+  const boards = (html) => parseIpoJi.listing(html).map((r) => [r.name, r.board]);
+
+  assert.deepEqual(
+    boards(
+      card('PhonePe', 'sme', 'BSE, NSE') +
+        card('Om Galaxy', 'sme', 'BSE SME') +
+        card('Qualiance', 'sme', 'NSE SME') +
+        card('NSE', 'mainboard', 'Mainboard')
+    ),
+    [
+      ['PhonePe', 'mainboard'],
+      ['Om Galaxy', 'sme'],
+      ['Qualiance', 'sme'],
+      ['NSE', 'mainboard'],
+    ]
+  );
+
+  // No badge at all: the attribute is all there is, so it is used.
+  assert.deepEqual(boards(card('Badgeless', 'sme', '')), [['Badgeless', 'sme']]);
+});
+
 test('ipoji.parseListing reads the debut price once an issue has listed', () => {
   // A listed card drops "Exp. Premium" and prints "List Price" instead. Missing
   // that left listed rows showing a stale forecast or nothing at all -- one had
