@@ -360,8 +360,16 @@
 
   /* Landing-page scroll reveal (components/landing/reveal.tsx). A transition
      rather than a keyframe animation, since it has two endpoints driven by
-     React state (not-yet-visible / visible) instead of a fixed run. */
+     React state (not-yet-visible / visible) instead of a fixed run.
+     min-width: 0 because this wraps a hero grid column below `lg` (where the
+     column has no explicit minmax(0, ...) track to fall back on) — without
+     it, a grid item's automatic minimum width is its content's min-content
+     size, so one sufficiently long, unbroken IPO name in the live GMP table
+     silently blows the whole hero out past the viewport on a phone. A
+     wrapper whose only job is a fade/lift must never be the thing setting a
+     flex/grid item's size floor. */
   .aw-reveal {
+    min-width: 0;
     opacity: 0;
     transform: translateY(var(--reveal-distance));
     transition:
