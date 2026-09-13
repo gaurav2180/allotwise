@@ -43,21 +43,30 @@ async function syncDetails() {
   // market_ipos holds a row per GMP source, so with more than one source
   // configured the same issue appears twice and would otherwise spend the fetch
   // budget pulling the same page again.
+  // Closed issues are included, not just open and upcoming ones. They are the
+  // set waiting on an allotment, and their detail page is the only source of
+  // the allotment date and of the published minimum application the estimated
+  // gain is built on -- Manipal Payment sat in the list with a premium, a
+  // price band and no gain beside it purely because it had closed. Listed
+  // issues are done and are left alone.
   const bySlug = new Map();
   for (const i of listMarketIpos()) {
-    if (i.status !== 'upcoming' && i.status !== 'open') continue;
+    if (i.status !== 'upcoming' && i.status !== 'open' && i.status !== 'closed') continue;
     if (!bySlug.has(i.slug)) bySlug.set(i.slug, i);
   }
 
-  // Open issues first. The default ordering is by open date descending, which
-  // puts the furthest-off upcoming IPOs at the front -- so an issue people are
-  // applying to *today* could fall past the fetch limit and sit there with no
-  // lot size or issue size while an IPO three weeks away had both.
+  // Open first, then closed, then upcoming -- roughly how much someone is
+  // waiting on the answer. The default ordering is by open date descending,
+  // which puts the furthest-off upcoming IPOs at the front, so an issue people
+  // are applying to *today* could fall past the fetch limit while one three
+  // weeks away had everything.
+  const rank = { open: 0, closed: 1, upcoming: 2 };
   const targets = [...bySlug.values()]
-    .sort((a, b) => {
-      if (a.status !== b.status) return a.status === 'open' ? -1 : 1;
-      return String(a.openDate ?? '').localeCompare(String(b.openDate ?? ''));
-    })
+    .sort(
+      (a, b) =>
+        (rank[a.status] ?? 3) - (rank[b.status] ?? 3) ||
+        String(a.openDate ?? '').localeCompare(String(b.openDate ?? ''))
+    )
     .slice(0, config.gmp.detailFetchLimit);
 
   let ok = 0;
