@@ -51,11 +51,10 @@ export async function GET(request: Request, ctx: { params: Promise<{ slug: strin
   const d = data.details ?? {};
   const t = data.timeline ?? {};
 
-  // Only reach for the page when something is actually missing. A price the
-  // backend stored is the cap alone ("₹124"); the page carries the real band
-  // ("₹118 to ₹124"), so a bandless price counts as incomplete too — otherwise
-  // open issues would show a single figure while closed ones showed a range.
-  const bandless = typeof d.priceBand === "string" && !/\bto\b|–|—|-/.test(d.priceBand);
+  // The backend used to store only the cap price, so a "bandless" value here
+  // meant an incomplete record worth scraping a second source for. It now
+  // stores the full range, so a single figure is a single-price issue and not a
+  // gap — treating it as one made every such row fetch a page it did not need.
   // An issue size with no rupee amount ("1,69,49,595 shares") is present but
   // unusable, so it counts as incomplete — otherwise an otherwise-full record
   // would short circuit below and never reach a source that has the amount.
@@ -66,7 +65,6 @@ export async function GET(request: Request, ctx: { params: Promise<{ slug: strin
     !d.faceValue ||
     !t.allotmentDate ||
     !t.listingDate ||
-    bandless ||
     amountless;
 
   if (!incomplete) return NextResponse.json(data);
@@ -93,9 +91,11 @@ export async function GET(request: Request, ctx: { params: Promise<{ slug: strin
     },
     details: {
       ...d,
-      // The scraped band is a range ("₹408 to ₹429"); the backend stores only
-      // the cap, so the fuller value is preferred when available.
-      priceBand: s.priceBand ?? d.priceBand ?? null,
+      // The scrape fills a gap; it never overrides. It used to win outright,
+      // from when the backend stored only a cap price — and the two disagree:
+      // Axiom Gas read ₹50-53 on the row and ₹67 here, so the panel contradicted
+      // the list and the estimated gain was divided by a price shown nowhere.
+      priceBand: fill(d.priceBand, s.priceBand),
       faceValue: fill(d.faceValue, s.faceValue),
       issueSize: sizedWithAmount ?? fill(d.issueSize, s.issueSize),
       issueType: fill(d.issueType, s.issueType),

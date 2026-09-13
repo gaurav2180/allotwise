@@ -25,6 +25,8 @@ const MARKET_EXTRA_COLUMNS = {
   logo_url: 'TEXT',
   listing_price: 'REAL',
   gmp_source: 'TEXT',
+  min_application_shares: 'INTEGER',
+  min_application_lots: 'INTEGER',
   details_updated_at: 'TEXT',
 };
 
@@ -221,6 +223,9 @@ const marketRowToApi = (r) => ({
   issueType: r.issue_type ?? null,
   lotSize: r.lot_size ?? null,
   minInvestment: r.min_investment ?? null,
+  // Straight from the issue's own application table, not derived.
+  minApplicationShares: r.min_application_shares ?? null,
+  minApplicationLots: r.min_application_lots ?? null,
   listingExchanges: r.listing_exchanges ?? null,
   allotmentDate: r.allotment_date ?? null,
   refundDate: r.refund_date ?? null,
@@ -242,6 +247,8 @@ const META_COLUMNS = {
   issueType: 'issue_type',
   lotSize: 'lot_size',
   minInvestment: 'min_investment',
+  minApplicationShares: 'min_application_shares',
+  minApplicationLots: 'min_application_lots',
   listingExchanges: 'listing_exchanges',
   allotmentDate: 'allotment_date',
   refundDate: 'refund_date',

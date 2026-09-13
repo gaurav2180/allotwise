@@ -184,6 +184,12 @@ marketRouter.get('/ipo/:slug', (req, res, next) => {
         issueType: primary.issueType,
         lotSize: primary.lotSize,
         minInvestment: primary.minInvestment,
+        // The smallest application the issue allows, as its own application
+        // table states it — one lot for mainboard, two for SME since July 2025.
+        // Published, not derived, so the estimated gain can be pointed at a
+        // source rather than argued for.
+        minApplicationShares: primary.minApplicationShares,
+        minApplicationLots: primary.minApplicationLots,
         listingExchanges: primary.listingExchanges,
         nseSymbol: primary.nseSymbol,
       },

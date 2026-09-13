@@ -300,6 +300,45 @@ test('ipoji.parse reads the data attributes and full offer dates', () => {
   );
 });
 
+test('ipoji.parseDetails reads the published minimum application', () => {
+  // The issue's own application table, which is what makes the estimated gain
+  // a sourced figure rather than a derived one. Mainboard says "Retail", SME
+  // says "Individual", and since July 2025 the SME minimum is two lots.
+  const table = (rows) =>
+    `<table><tr><th>Application</th><th>Lots</th><th>Shares</th><th>Amount</th></tr>${rows}</table>`;
+  const row = (label, lots, shares, amount) =>
+    `<tr><td>${label}</td><td>${lots}</td><td>${shares}</td><td>${amount}</td></tr>`;
+
+  const sme = parseIpoJiDetails(
+    table(
+      row('Individual (min)', '2', '1,200', '₹2,23,200') +
+        row('Individual(max)', '2', '1,200', '₹2,23,200') +
+        row('sHNI(min)', '3', '1,800', '₹3,34,800')
+    )
+  );
+  assert.equal(sme.minApplicationShares, 1200);
+  assert.equal(sme.minApplicationLots, 2);
+  // The amount comes from the same row as the share count, so the two always
+  // describe one application.
+  assert.equal(sme.minInvestment, 223200);
+
+  const mainboard = parseIpoJiDetails(
+    table(row('Retail (min)', '1', '8', '₹14,280') + row('Retail(max)', '14', '112', '₹1,99,920'))
+  );
+  assert.equal(mainboard.minApplicationShares, 8);
+  assert.equal(mainboard.minApplicationLots, 1);
+  assert.equal(mainboard.minInvestment, 14280);
+
+  // An sHNI row must never be mistaken for the retail minimum.
+  const hniOnly = parseIpoJiDetails(table(row('sHNI(min)', '3', '1,800', '₹3,34,800')));
+  assert.equal(hniOnly.minApplicationShares, null);
+
+  // No table yet — the issue is announced but not priced. Nothing is invented.
+  const none = parseIpoJiDetails('<html><body>nothing here</body></html>');
+  assert.equal(none.minApplicationShares, null);
+  assert.equal(none.minApplicationLots, null);
+});
+
 test('ipoji.parseDetails prefers the fact list and falls back to the timeline', () => {
   const html = `
     <dl class="fact-item"><dt class="fact-label"><i></i> Issue size</dt><dd class="fact-value">&#8377;45.11 Cr</dd></dl>

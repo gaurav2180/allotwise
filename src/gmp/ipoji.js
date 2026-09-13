@@ -409,9 +409,54 @@ function timelinePairs(html) {
   return pairs;
 }
 
+/**
+ * The smallest application the issue allows, as the issue itself states it.
+ *
+ * IPO Ji reproduces the application table from the prospectus:
+ *
+ *   Application        Lots  Shares  Amount
+ *   Individual (min)   2     1,200   ₹2,23,200      (SME)
+ *   Retail (min)       1     8       ₹14,280        (mainboard)
+ *
+ * That row is the answer to "what would I actually make", and reading it beats
+ * deriving it. The derivation -- minimum investment divided by lot size and cap
+ * price -- needed three fields to be present and to reconcile to the rupee, and
+ * left a dash whenever any of them was missing. More to the point, a published
+ * figure can be pointed at; a computed one has to be argued for.
+ *
+ * Mainboard says "Retail", SME says "Individual", and since July 2025 the SME
+ * minimum has been two lots rather than one, which is exactly the thing nobody
+ * should be inferring.
+ */
+function parseMinApplication(html) {
+  for (const table of html.match(/<table[\s\S]*?<\/table>/gi) ?? []) {
+    if (!/Application[\s\S]{0,120}Lots[\s\S]{0,120}Shares/i.test(table)) continue;
+
+    for (const rowHtml of table.match(/<tr[\s\S]*?<\/tr>/gi) ?? []) {
+      const cells = [...(rowHtml.match(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi) ?? [])].map((c) =>
+        stripTags(c.replace(/^<t[dh][^>]*>/i, ''))
+      );
+      if (cells.length < 4) continue;
+      if (!/^(retail|individual)\s*\(?\s*min/i.test(cells[0])) continue;
+
+      const num = (s) => {
+        const n = Number(String(s ?? '').replace(/[₹,\s]/g, ''));
+        return Number.isFinite(n) && n > 0 ? n : null;
+      };
+      const lots = num(cells[1]);
+      const shares = num(cells[2]);
+      const amount = num(cells[3]);
+      if (!shares || !amount) continue;
+      return { minApplicationLots: lots, minApplicationShares: shares, minInvestment: amount };
+    }
+  }
+  return null;
+}
+
 export function parseDetails(html) {
   const facts = factPairs(html);
   const steps = timelinePairs(html);
+  const minApp = parseMinApplication(html);
   const pick = (...keys) => {
     for (const k of keys) {
       if (facts[k]) return facts[k];
@@ -430,7 +475,12 @@ export function parseDetails(html) {
     allotmentDate: isoDate(pick('allotment date')),
     listingDate: isoDate(pick('listing', 'listing date')),
     lotSize: cleanInt(pick('lot size')),
-    minInvestment: cleanInt(pick('minimum investment')),
+    // The application table's own amount when it has one, since that is the
+    // same row the share count comes from and the two must describe one
+    // application. The summary fact is the fallback.
+    minInvestment: minApp?.minInvestment ?? cleanInt(pick('minimum investment')),
+    minApplicationShares: minApp?.minApplicationShares ?? null,
+    minApplicationLots: minApp?.minApplicationLots ?? null,
   };
 }
 

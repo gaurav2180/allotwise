@@ -120,6 +120,11 @@ export const ipoDetailSchema = z.object({
     issueType: z.string().nullable(),
     lotSize: z.number().nullable(),
     minInvestment: z.number().nullable(),
+    // The smallest application the issue allows, straight from its own
+    // application table — one lot on mainboard, two on SME since July 2025.
+    // Nullable: a table exists only once the issue is announced.
+    minApplicationShares: z.number().nullable().default(null),
+    minApplicationLots: z.number().nullable().default(null),
     listingExchanges: z.string().nullable(),
     nseSymbol: z.string().nullable(),
   }),

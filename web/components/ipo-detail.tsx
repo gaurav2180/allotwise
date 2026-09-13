@@ -77,24 +77,42 @@ export function IpoDetailPanel({
 
   const { details, timeline } = data;
   const lot = details.lotSize;
-  // Premium earned on the smallest application that can actually be made, so
-  // this cell and "Min investment" describe the same money. Not lot size times
-  // premium: SME minimums are two lots, and that version showed half the profit
-  // on the investment named beside it. Unofficial in, unofficial out — "Est.".
-  const minApp = minApplication(lot, details.minInvestment, details.priceBand);
-  const estProfit = gmp !== null && minApp ? gmp * minApp.shares : null;
+
+  // The smallest application the issue allows — read from its own application
+  // table, which states it outright ("Individual (min) | 2 | 1,200 | ₹2,23,200"
+  // for SME, "Retail (min) | 1 | 8 | ₹14,280" for mainboard). Deriving it from
+  // lot size and minimum investment needed three fields to reconcile to the
+  // rupee and left a dash whenever one was missing; a published figure can also
+  // be pointed at, which a computed one cannot.
+  //
+  // The derivation stays as a fallback for issues whose table is not out yet.
+  const derived = minApplication(lot, details.minInvestment, details.priceBand);
+  const minApp =
+    details.minApplicationShares !== null
+      ? { shares: details.minApplicationShares, lots: details.minApplicationLots }
+      : derived && { shares: derived.shares, lots: derived.lots };
+
+  // Premium on that application, so this cell and "Min investment" describe the
+  // same money. Not premium times lot size: an SME minimum is two lots, and
+  // that version showed half the gain on the investment named beside it.
+  const estGain = gmp !== null && minApp ? gmp * minApp.shares : null;
 
   return (
     <div className="pt-3">
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
         <Cell label="Lot size" value={lot ? `${inr(lot)} shares` : null} />
         <Cell
-          label={minApp && minApp.lots > 1 ? `Min investment (${minApp.lots} lots)` : "Min investment"}
+          label={
+            minApp?.lots ? `Min application (${minApp.lots} lot${minApp.lots > 1 ? "s" : ""})` : "Min application"
+          }
           value={details.minInvestment ? `₹${inr(details.minInvestment)}` : null}
         />
+        {/* The label names the quantity. "Est. profit on min." said nothing
+            about what the profit was on, and the answer differs by board — one
+            lot on mainboard, two on SME — so it could not be inferred either. */}
         <Cell
-          label="Est. profit on min."
-          value={estProfit !== null ? `₹${inr(estProfit)}` : null}
+          label={minApp ? `Est. gain on ${inr(minApp.shares)} shares` : "Est. gain"}
+          value={estGain !== null ? `₹${inr(estGain)}` : null}
         />
         <Cell label="Issue size" value={formatIssueSize(details.issueSize)} />
         <Cell label="Price band" value={tidy(details.priceBand)} />
@@ -115,11 +133,13 @@ export function IpoDetailPanel({
 
       <GmpHistoryPanel slug={slug} headlineGmp={gmp} headlineSource={gmpSource} />
 
-      {estProfit !== null && (
+      {estGain !== null && minApp && (
         <p className="mt-3 text-[12px] text-dim">
-          Est. profit is the grey market premium on {inr(minApp?.shares ?? 0)} shares — the smallest
-          application this issue allows, the same one priced above. GMP is unofficial and moves daily
-          — it is not a quote, and it is frequently wrong.{" "}
+          Grey market premium of ₹{inr(gmp as number)} × {inr(minApp.shares)} shares — the smallest
+          application this issue allows{minApp.lots ? ` (${minApp.lots} lot${minApp.lots > 1 ? "s" : ""})` : ""},
+          as stated in its own application table and priced in the cell above. It assumes full
+          allotment. GMP is unofficial and moves daily — it is not a quote, and it is frequently
+          wrong.{" "}
           <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
             Full disclaimer
           </Link>
