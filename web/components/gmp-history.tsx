@@ -243,10 +243,15 @@ export function GmpHistoryPanel({
 
                 <p className="mt-2 text-[11px] text-dim">
                   {data.source === "ipoji" ? (
-                    <>Day-wise history via IPO Ji (ipoji.com), the same source as the premium above.</>
+                    <>
+                      Day-wise history via IPO Ji (ipoji.com). Too few readings of our own to chart
+                      yet, so this comes from a different tracker than the premium above and the two
+                      may not agree.
+                    </>
                   ) : (
                     <>
-                      Recorded by Allotwise, so history starts from when tracking began rather than
+                      Recorded by Allotwise from the same reading as the premium above, so the line
+                      ends where the row does. History starts from when tracking began rather than
                       from the issue&rsquo;s announcement.
                     </>
                   )}

@@ -18,7 +18,7 @@ import { parseDateRange, normalizeStatus, parseRupees, parseEstListing } from '.
 import { parse as parseIpoWatch, parseDetails } from '../src/gmp/ipowatch.js';
 import { parse as parseIpoJiGmp, parseListing, parseDetails as parseIpoJiDetails } from '../src/gmp/ipoji.js';
 const parseIpoJi = Object.assign(parseIpoJiGmp, { listing: parseListing });
-import { mergeBySlug, applyFallbackGmp } from '../src/gmp/index.js';
+import { mergeBySlug, resolveGmp } from '../src/gmp/index.js';
 import { nameTokens, matchScore, bestMatch } from '../src/lib/ipoMatch.js';
 import { nseDate, normalizeCategory, parseSubscription } from '../src/market/nse.js';
 
@@ -466,12 +466,12 @@ test('ipoji.parseListing reads the debut price once an issue has listed', () => 
   assert.equal(parseIpoJi.listing(card('Pending', 'N/A'))[0].listingPrice, null);
 });
 
-test('a second GMP source is what puts an IPO in the list twice', () => {
-  // The bug in one assertion. IPO Watch called this issue "NSE"; IPO Ji calls it
-  // "National Stock Exchange of India". They are the same company and they share
-  // no slug and no name token, so nothing downstream can reconcile them --
-  // mergeBySlug keys on the slug, and the fuzzy matcher used for registrar links
-  // scores this pair at zero. The only fix is not to have two sources.
+test('a second CALENDAR source is what puts an IPO in the list twice', () => {
+  // The bug in one assertion, and the reason the guard sits on the calendar
+  // source rather than on the premium chain. IPO Watch called this issue "NSE";
+  // IPO Ji calls it "National Stock Exchange of India". Same company, no shared
+  // slug and no shared name token, so nothing downstream can reconcile them --
+  // mergeBySlug keys on the slug and the fuzzy matcher scores this pair at zero.
   assert.notEqual(slugify('NSE'), slugify('National Stock Exchange of India'));
   assert.equal(matchScore('NSE', 'National Stock Exchange of India'), 0);
 
@@ -479,19 +479,23 @@ test('a second GMP source is what puts an IPO in the list twice', () => {
     { slug: 'nse', source: 'ipowatch', name: 'NSE', gmp: 218 },
     { slug: 'national-stock-exchange-of-india', source: 'ipoji', name: 'National Stock Exchange of India', gmp: 208 },
   ];
-  assert.equal(mergeBySlug(rows).length, 2, 'deduplication cannot save a two-source setup');
+  assert.equal(mergeBySlug(rows).length, 2, 'deduplication cannot save two row sources');
 
-  // Which is why the default is a single source, and why configuring a second
-  // one has to be deliberate rather than a variable someone edits in passing.
-  assert.deepEqual(config.gmp.sources, ['ipoji']);
+  // Which is why exactly one source decides what exists...
+  assert.equal(config.gmp.calendarSource, 'ipoji');
+  assert.ok(!config.gmp.calendarSource.includes(','));
+  // ...while any number may supply a premium, because those only fill values
+  // onto rows that already exist.
+  assert.ok(config.gmp.sources.length >= 1);
+  assert.equal(config.gmp.sources[0], 'ipowatch', 'the best-covering tracker leads for every board');
 });
 
-test('a second GMP source cannot be configured by accident', async () => {
+test('a second calendar source cannot be configured by accident', async () => {
   const run = (env) =>
     new Promise((resolve) => {
       const child = spawn(
         process.execPath,
-        ['-e', "import('./src/config.js').then(m => console.log(m.config.gmp.sources.join(',')))"],
+        ['-e', "import('./src/config.js').then(m => console.log(m.config.gmp.calendarSource + '|' + m.config.gmp.sources.join(',')))"],
         { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }
       );
       let out = '';
@@ -501,110 +505,117 @@ test('a second GMP source cannot be configured by accident', async () => {
       child.on('close', (code) => resolve({ code, out: out.trim(), err }));
     });
 
-  // The process must refuse to start, and say why -- duplicated rows surfacing
-  // hours after an unrelated-looking config edit is the failure being prevented.
-  const refused = await run({ GMP_SOURCES: 'ipoji,ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: '' });
-  assert.notEqual(refused.code, 0, 'two sources must not boot');
-  assert.match(refused.err, /only one is supported/);
-  assert.match(refused.err, /National Stock Exchange of India/, 'the error has to explain the failure');
+  // Two calendar sources must not boot, and the error has to explain why --
+  // duplicated rows surfacing hours after a config edit is the failure being
+  // prevented, and nobody connects the two.
+  const refused = await run({ GMP_CALENDAR_SOURCE: 'ipoji,ipowatch' });
+  assert.notEqual(refused.code, 0, 'two calendar sources must not boot');
+  assert.match(refused.err, /exactly one source/);
+  assert.match(refused.err, /National Stock Exchange of India/);
 
-  // Deliberate is still allowed: the guard is a tripwire, not a wall.
-  const allowed = await run({ GMP_SOURCES: 'ipoji,ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: 'true' });
-  assert.equal(allowed.code, 0);
-  assert.equal(allowed.out, 'ipoji,ipowatch');
+  // A long premium chain is fine: it cannot create a row.
+  const chained = await run({ GMP_SOURCES: 'ipowatch,ipoji' });
+  assert.equal(chained.code, 0);
+  assert.equal(chained.out, 'ipoji|ipowatch,ipoji');
 
-  const single = await run({ GMP_SOURCES: 'ipowatch', GMP_ALLOW_MULTIPLE_SOURCES: '' });
-  assert.equal(single.code, 0);
-  assert.equal(single.out, 'ipowatch');
+  // And the calendar source can be swapped, just not doubled.
+  const swapped = await run({ GMP_CALENDAR_SOURCE: 'ipowatch' });
+  assert.equal(swapped.code, 0);
+  assert.match(swapped.out, /^ipowatch\|/);
 });
 
-test('the GMP fallback fills gaps without ever adding a row', async () => {
-  // IPO Ji prints no premium at all for a large share of SME issues -- seven of
-  // nine open SME rows one afternoon -- so those showed an em dash, which reads
-  // as "unknown" whether the truth is "not quoted" or "quoted at zero".
+test('resolveGmp never adds, renames or removes a row', async () => {
+  // The invariant the whole split rests on: premium sources fill values onto
+  // rows the calendar already created. As a *row* source IPO Watch calls one
+  // issue "NSE" where IPO Ji says "National Stock Exchange of India", and the
+  // list doubles -- so the chain may be any length only because it cannot do
+  // this.
   const rows = [
-    { slug: 'quoted', name: 'Quoted Issue', priceBand: '₹100-110', gmp: 20, estGainPct: 18.18, estListingPrice: 130, source: 'ipoji' },
-    { slug: 'silent', name: 'Silent Issue', priceBand: '₹85-90', gmp: null, estGainPct: null, estListingPrice: null, source: 'ipoji' },
-    { slug: 'zero', name: 'Zero Issue', priceBand: '₹70-74', gmp: null, estGainPct: null, estListingPrice: null, source: 'ipoji' },
-    { slug: 'unknown-to-both', name: 'Nobody Quotes This', priceBand: '₹50', gmp: null, estGainPct: null, estListingPrice: null, source: 'ipoji' },
+    { slug: 'quoted', name: 'Quoted Issue', priceBand: '₹100-110', gmp: 20, source: 'ipoji' },
+    { slug: 'silent', name: 'Silent Issue', priceBand: '₹85-90', gmp: null, source: 'ipoji' },
+    { slug: 'unknown-to-both', name: 'Nobody Quotes This', priceBand: '₹50', gmp: null, source: 'ipoji' },
   ];
+  const before = rows.map((r) => r.slug);
 
-  const before = rows.length;
-  const result = await applyFallbackGmp(rows, {
-    // Stands in for the fallback tracker. "NSE" against "National Stock
-    // Exchange of India" is why this may never create rows: as a row source
-    // that pair is two IPOs, and the duplicates are back.
-    meta: { id: 'ipowatch' },
-    fetchGmp: async () => [
-      { slug: 'silent-issue', name: 'Silent Issue', gmp: 7 },
-      { slug: 'zero-issue', name: 'Zero Issue', gmp: 0 },
-      { slug: 'some-other-ipo', name: 'Some Other IPO Entirely', gmp: 99 },
-    ],
-  });
-
-  assert.equal(rows.length, before, 'the fallback must never add an IPO');
-  assert.equal(result.filled, 2);
-
-  // The primary wins wherever it has a figure. The two trackers disagree on
-  // value where both quote (Maharaja: ₹12 against ₹30), so this is not a merge.
-  assert.equal(rows[0].gmp, 20);
-  assert.equal(rows[0].estGainPct, 18.18);
-
-  // A borrowed premium, with the percentage recomputed against OUR band rather
-  // than carried over -- ₹7 on a ₹90 cap is 7.78%, whatever the other site says.
-  assert.equal(rows[1].gmp, 7);
-  assert.equal(rows[1].estGainPct, 7.78);
-  assert.equal(rows[1].estListingPrice, 97);
-  assert.equal(rows[1].gmpSource, 'ipowatch');
-
-  // Zero is a real quote: "no premium", which is not the same as "not quoted".
-  assert.equal(rows[2].gmp, 0);
-  assert.equal(rows[2].estGainPct, 0);
-  assert.equal(rows[2].gmpSource, 'ipowatch');
-
-  // No match, no invention.
-  assert.equal(rows[3].gmp, null);
-  assert.equal(rows[3].gmpSource, undefined);
-});
-
-test('the GMP fallback keeps the rows when the fallback source is down', async () => {
-  const rows = [{ slug: 'a', name: 'Alpha Issue', priceBand: '₹10', gmp: null, source: 'ipoji' }];
-  const result = await applyFallbackGmp(rows, {
-    fetchGmp: async () => {
-      throw new Error('upstream down');
+  await resolveGmp(rows, {
+    injected: {
+      meta: { id: 'ipowatch' },
+      fetchGmp: async () => [
+        { slug: 'silent-issue', name: 'Silent Issue', gmp: 7 },
+        { slug: 'nse', name: 'NSE', gmp: 99 },
+        { slug: 'some-other-ipo', name: 'Some Other IPO Entirely', gmp: 99 },
+      ],
     },
   });
-  assert.equal(result.filled, 0);
-  assert.equal(rows.length, 1, 'a failed fallback must not cost the primary rows');
-  assert.equal(rows[0].gmp, null);
+
+  assert.deepEqual(rows.map((r) => r.slug), before, 'row set must be untouched');
+  // No match, no invention.
+  assert.equal(rows[2].gmp, null);
+  assert.equal(rows[2].gmpSource, null);
 });
 
-test('every row a fallback fills is arithmetically self-consistent', async () => {
-  // Whichever tracker the premium comes from, the percentage and the indicative
-  // listing price on that row are computed from OUR band — so the three figures
-  // always agree with each other, which is what a reader actually checks.
+test('resolveGmp re-resolves every row, so the board cannot decide the tracker', async () => {
+  // The bug this refactor exists to kill. The calendar's own premium used to be
+  // authoritative and a second tracker only filled gaps -- and because IPO Ji
+  // quotes almost no SME, SME rows came from one tracker and mainboard rows
+  // from another, so two rows in one list were not comparable.
+  const rows = [
+    { slug: 'mainboard-issue', name: 'Kanohar Electricals', board: 'mainboard', priceBand: '₹100', gmp: 20, source: 'ipoji' },
+    { slug: 'sme-issue', name: 'Qualiance International', board: 'sme', priceBand: '₹100', gmp: null, source: 'ipoji' },
+  ];
+
+  await resolveGmp(rows, {
+    injected: {
+      meta: { id: 'ipowatch' },
+      fetchGmp: async () => [
+        { slug: 'kanohar', name: 'Kanohar Electricals', gmp: 30 },
+        { slug: 'qualiance', name: 'Qualiance International', gmp: 8 },
+      ],
+    },
+  });
+
+  // The leading link answers both, including the row the calendar had quoted.
+  assert.equal(rows[0].gmp, 30, 'a calendar premium does not outrank the chain');
+  assert.equal(rows[1].gmp, 8);
+  assert.deepEqual([...new Set(rows.map((r) => r.gmpSource))], ['ipowatch'], 'one tracker for both boards');
+});
+
+test('resolveGmp keeps the rows when a source is down', async () => {
+  const rows = [{ slug: 'a', name: 'Alpha Issue', priceBand: '₹10', gmp: 3, source: 'ipoji' }];
+  const result = await resolveGmp(rows, {
+    injected: { meta: { id: 'down' }, fetchGmp: async () => { throw new Error('upstream down'); } },
+  });
+  assert.equal(result.resolved, 0);
+  assert.equal(rows.length, 1, 'a failed source must not cost the rows');
+});
+
+test('every row resolveGmp answers is arithmetically self-consistent', async () => {
+  // Whichever tracker supplies the premium, the percentage and the indicative
+  // listing price are computed from OUR band, so the three figures on a row
+  // always agree with each other -- which is what a reader actually checks.
   const rows = [
     { slug: 'a', name: 'Alpha Issue', priceBand: '₹85-90', gmp: null, source: 'ipoji' },
     { slug: 'b', name: 'Beta Issue', priceBand: '₹71 to ₹75 Per Share', gmp: null, source: 'ipoji' },
     { slug: 'c', name: 'Gamma Issue', priceBand: '₹1,700-1,785', gmp: null, source: 'ipoji' },
-    // No band announced yet: a premium can still be shown, but no percentage
-    // can be derived from nothing, and none is invented.
+    // No band announced: a premium can still be shown, but no percentage can be
+    // derived from nothing, and none is invented.
     { slug: 'd', name: 'Delta Issue', priceBand: null, gmp: null, source: 'ipoji' },
   ];
 
-  await applyFallbackGmp(rows, {
-    fetchGmp: async () => [
-      { slug: 'alpha', name: 'Alpha Issue', gmp: 7 },
-      { slug: 'beta', name: 'Beta Issue', gmp: 10 },
-      { slug: 'gamma', name: 'Gamma Issue', gmp: 208 },
-      { slug: 'delta', name: 'Delta Issue', gmp: 5 },
-    ],
+  await resolveGmp(rows, {
+    injected: {
+      meta: { id: 'ipowatch' },
+      fetchGmp: async () => [
+        { slug: 'alpha', name: 'Alpha Issue', gmp: 7 },
+        { slug: 'beta', name: 'Beta Issue', gmp: 10 },
+        { slug: 'gamma', name: 'Gamma Issue', gmp: 208 },
+        { slug: 'delta', name: 'Delta Issue', gmp: 5 },
+      ],
+    },
   });
 
   for (const row of rows.slice(0, 3)) {
-    const cap = Math.max(
-      ...String(row.priceBand).replace(/,/g, '').match(/\d+(?:\.\d+)?/g).map(Number)
-    );
+    const cap = Math.max(...String(row.priceBand).replace(/,/g, '').match(/\d+(?:\.\d+)?/g).map(Number));
     assert.equal(row.estGainPct, Number(((row.gmp / cap) * 100).toFixed(2)), row.slug);
     assert.equal(row.estListingPrice, cap + row.gmp, row.slug);
   }
@@ -616,7 +627,7 @@ test('every row a fallback fills is arithmetically self-consistent', async () =>
   assert.equal(rows[3].estListingPrice, null);
 });
 
-test('the GMP fallback chain moves on when a link is down or has no figure', async () => {
+test('resolveGmp moves down the chain when a link is down or silent', async () => {
   const rows = [
     { slug: 'a', name: 'Alpha Issue', priceBand: '₹100', gmp: null, source: 'ipoji' },
     { slug: 'b', name: 'Beta Issue', priceBand: '₹100', gmp: null, source: 'ipoji' },
@@ -629,15 +640,25 @@ test('the GMP fallback chain moves on when a link is down or has no figure', asy
   };
   const last = {
     meta: { id: 'last' },
-    // Would overwrite Alpha too if the chain re-offered filled rows, which it
-    // must not: the first link with a figure wins.
+    // Would overwrite Alpha too if a later link were re-offered a filled row,
+    // which it must not be: the first link with a figure wins.
     fetchGmp: async () => [
       { slug: 'alpha', name: 'Alpha Issue', gmp: 99 },
       { slug: 'beta', name: 'Beta Issue', gmp: 6 },
     ],
   };
 
-  for (const source of [down, partial, last]) await applyFallbackGmp(rows, source);
+  // Each call is one link; a real run walks them inside a single call.
+  for (const source of [down, partial, last]) {
+    const pending = rows.filter((r) => r.gmp === null).map((r) => ({ ...r }));
+    const out = await resolveGmp(pending, { injected: source });
+    if (!out.resolved) continue;
+    for (const p of pending) {
+      if (p.gmp === null) continue;
+      const row = rows.find((r) => r.slug === p.slug);
+      Object.assign(row, p);
+    }
+  }
 
   assert.equal(rows[0].gmp, 4, 'the first link with a figure wins');
   assert.equal(rows[0].gmpSource, 'partial');

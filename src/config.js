@@ -54,38 +54,34 @@ export const config = {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36'
     ),
     timeoutMs: num(process.env.GMP_TIMEOUT_MS, 20000),
-    // Sources to pull, comma-separated. Deliberately ONE by default.
+    // WHO SUPPLIES THE ROWS. One source, and one only: it decides which IPOs
+    // exist, what they are called and every published fact about them -- dates,
+    // price band, lot size, issue size, minimum application, listing price,
+    // logo, board. A second row source puts the same issue in the list twice
+    // whenever the two name it differently ("NSE" against "National Stock
+    // Exchange of India"), and nothing downstream can reconcile that.
     //
-    // Two trackers meant the same IPO appearing twice whenever they named it
-    // differently -- "NSE" and "National Stock Exchange of India" share no slug
-    // and no name token, so neither slug matching nor the fuzzy name matcher can
-    // tell they are one company. Deduplication after the fact cannot close that;
-    // only not creating the duplicate can. Adding a second source here brings
-    // the problem back, and `mergeBySlug` will catch only the easy cases.
-    // Ordered chain of sources that fill in a premium the primary does not
-    // quote. Tried left to right; the first with a figure for that issue wins,
-    // and one being down or not carrying the issue just moves on to the next.
+    // IPO Ji holds this job because it is the better-formed source for facts:
+    // ISO dates in `<time datetime>` rather than "28-1 Sept" with a year to
+    // infer, full price bands rather than a bare cap, issue size as a rupee
+    // amount rather than a share count, and the prospectus application table
+    // verbatim.
+    calendarSource: str(process.env.GMP_CALENDAR_SOURCE, 'ipoji'),
+
+    // WHO SUPPLIES THE PREMIUM. A separate question, and the reason this is
+    // split: the source with the best facts is not the source with the best
+    // grey market coverage.
     //
-    // Values only: matched onto rows that already exist, never creating one, so
-    // no number of entries here can reintroduce the duplicates that made this a
-    // single-source pipeline. That is what makes a chain safe where a second
-    // *row* source is not. Set empty to disable.
+    // Tried in order; the first with a figure for an issue wins, whatever its
+    // board. Measured over one live board, IPO Watch quoted 15 of 15 SME issues
+    // and IPO Ji 2; on mainboard they tied at 11 of 25. So IPO Watch leads for
+    // everything -- there is no per-board routing, which is what produced a
+    // list where SME and mainboard rows were quoted by different trackers and
+    // could not be compared with each other.
     //
-    // Needed because IPO Ji prints no premium at all for a good share of SME
-    // issues -- 7 of 9 open SME rows on one afternoon -- while IPO Watch quotes
-    // them. The two disagree on value where both have one (Maharaja: ₹12
-    // against ₹30), which is why the primary always wins and this only speaks
-    // when the primary is silent.
-    //
-    // Adding an alternative is one entry in the SOURCES registry plus its name
-    // here. Two candidates were rejected on inspection rather than taste:
-    // InvestorGain serves its table from Next.js payload chunks and IPO Bazar
-    // renders GMP client-side, so neither can be read from the HTML at all.
-    fallbackSources: str(process.env.GMP_FALLBACK_SOURCES, 'ipowatch')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
-    sources: str(process.env.GMP_SOURCES, 'ipoji')
+    // These only ever fill a premium onto a row the calendar already created,
+    // so the length of this list cannot affect which IPOs appear.
+    sources: str(process.env.GMP_SOURCES, 'ipowatch,ipoji')
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
@@ -135,28 +131,29 @@ export const config = {
   },
 };
 
-// Refuse to start with more than one GMP source unless someone says, in writing,
-// that they mean it.
+// The calendar source must be exactly one, and must exist.
 //
-// This is not a style preference. Two trackers name the same company
-// differently -- "NSE" against "National Stock Exchange of India" -- and that
-// pair shares no slug and no name token, so `mergeBySlug` sees two IPOs and the
-// fuzzy matcher used for registrar links scores them at zero. The result is the
-// same issue listed twice, which is a data bug a user sees immediately and no
-// deduplication downstream can fix. It was shipped once already.
+// This is the guard that used to cover GMP_SOURCES, and it moved here when the
+// two were split. It was never really about premiums: what a second source
+// breaks is row identity. Two trackers name the same company differently --
+// "NSE" against "National Stock Exchange of India" -- and that pair shares no
+// slug and no name token, so `mergeBySlug` sees two IPOs and the fuzzy matcher
+// used for registrar links scores them at zero. The issue is then listed twice,
+// which no deduplication downstream can fix. It shipped that way once.
 //
-// Failing at boot is the point: a second source added by editing an environment
-// variable would otherwise surface hours later as duplicated rows nobody
-// connects to the change.
-if (config.gmp.sources.length > 1 && process.env.GMP_ALLOW_MULTIPLE_SOURCES !== 'true') {
+// GMP_SOURCES is deliberately NOT guarded: those only fill a premium onto a row
+// the calendar already created, so any number of them is safe.
+if (!config.gmp.calendarSource) {
+  throw new Error('GMP_CALENDAR_SOURCE must name exactly one source (it decides which IPOs exist).');
+}
+if (config.gmp.calendarSource.includes(',')) {
   throw new Error(
-    `GMP_SOURCES lists ${config.gmp.sources.length} sources (${config.gmp.sources.join(', ')}), ` +
-      'but only one is supported.\n' +
-      '  Two sources put the same IPO in the list twice whenever they name it differently\n' +
-      '  ("NSE" vs "National Stock Exchange of India"): no shared slug, no shared name token,\n' +
-      '  so nothing downstream can tell they are one company.\n' +
-      '  Set GMP_SOURCES to a single source, or GMP_ALLOW_MULTIPLE_SOURCES=true if you have\n' +
-      '  a way to reconcile the names and accept duplicates until you do.'
+    `GMP_CALENDAR_SOURCE is "${config.gmp.calendarSource}", but it must name exactly one source.
+  It decides which IPOs exist and what they are called. Two sources name the same
+  company differently ("NSE" vs "National Stock Exchange of India") and the issue
+  then appears twice, which no deduplication downstream can fix.
+  To take a premium from more than one tracker, list them in GMP_SOURCES instead:
+  those fill values onto rows the calendar already created and cannot duplicate one.`
   );
 }
 

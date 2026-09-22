@@ -25,8 +25,15 @@ const row = (p: Partial<IpoListItem> & { name: string }) =>
     ...p,
   }) as IpoListItem;
 
-const names = (rows: IpoListItem[], cmp: (a: IpoListItem, b: IpoListItem) => number) =>
-  [...rows].sort(cmp).map((r) => r.name);
+// Pinned so the fixtures cannot rot: phase depends on today's date, and these
+// tests once passed when written and failed a week later purely because the
+// calendar had moved past the dates in them.
+const NOW = new Date("2026-09-12T00:00:00Z");
+
+const names = (
+  rows: IpoListItem[],
+  cmp: (a: IpoListItem, b: IpoListItem, now?: Date) => number
+) => [...rows].sort((a, b) => cmp(a, b, NOW)).map((r) => r.name);
 
 describe("Ongoing", () => {
   it("puts open issues first, closing soonest", () => {

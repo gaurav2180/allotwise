@@ -71,9 +71,16 @@ const LONG_PAST = "0000-01-01";
 
 const byName = (a: IpoListItem, b: IpoListItem) => a.name.localeCompare(b.name);
 
-/** Open issues first, closing soonest — then those closed and awaiting allotment. */
-export function compareOngoing(a: IpoListItem, b: IpoListItem): number {
-  const openRank = (r: IpoListItem) => (derivePhase(r) === "open" ? 0 : 1);
+/**
+ * Open issues first, closing soonest — then those closed and awaiting allotment.
+ *
+ * `now` is a parameter rather than read from the clock inside, so a comparator
+ * is a pure function of its inputs. Phase depends on today's date, which made
+ * these untestable without the fixtures rotting: a test pinned to real dates
+ * passed when written and failed ten days later for no reason but the calendar.
+ */
+export function compareOngoing(a: IpoListItem, b: IpoListItem, now = new Date()): number {
+  const openRank = (r: IpoListItem) => (derivePhase(r, now) === "open" ? 0 : 1);
   const diff = openRank(a) - openRank(b);
   if (diff !== 0) return diff;
 
@@ -87,14 +94,14 @@ export function compareOngoing(a: IpoListItem, b: IpoListItem): number {
 }
 
 /** Opening soonest first; an issue with no date announced sits at the end. */
-export function compareUpcoming(a: IpoListItem, b: IpoListItem): number {
+export function compareUpcoming(a: IpoListItem, b: IpoListItem, _now = new Date()): number {
   // A null date cannot be placed among real ones, and sorting it as "" would
   // put Jio and PhonePe above an issue opening tomorrow.
   return (a.openDate ?? FAR_FUTURE).localeCompare(b.openDate ?? FAR_FUTURE) || byName(a, b);
 }
 
 /** Allotment out but not yet listed first — there is still something to come. */
-export function compareAllotted(a: IpoListItem, b: IpoListItem): number {
+export function compareAllotted(a: IpoListItem, b: IpoListItem, _now = new Date()): number {
   const listedRank = (r: IpoListItem) => (r.listedOn || r.listing ? 1 : 0);
   const diff = listedRank(a) - listedRank(b);
   if (diff !== 0) return diff;
@@ -109,14 +116,14 @@ export function compareAllotted(a: IpoListItem, b: IpoListItem): number {
  * Search spans every tab, so it needs one order across all of them: what is
  * live, then what is coming, then what is done.
  */
-export function compareSearch(a: IpoListItem, b: IpoListItem): number {
+export function compareSearch(a: IpoListItem, b: IpoListItem, now = new Date()): number {
   const phaseRank = (r: IpoListItem) => {
-    const phase = derivePhase(r);
+    const phase = derivePhase(r, now);
     return phase === "open" ? 0 : phase === "upcoming" ? 1 : 2;
   };
   const diff = phaseRank(a) - phaseRank(b);
   if (diff !== 0) return diff;
-  return phaseRank(a) === 1 ? compareUpcoming(a, b) : compareOngoing(a, b);
+  return phaseRank(a) === 1 ? compareUpcoming(a, b, now) : compareOngoing(a, b, now);
 }
 
 const BOARDS: { value: BoardFilter; label: string }[] = [

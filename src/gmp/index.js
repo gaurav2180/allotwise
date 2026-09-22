@@ -30,47 +30,73 @@ function capPrice(band) {
 }
 
 /**
- * Fill in a premium for rows the primary source does not quote.
+ * Decide every row's premium, from one prioritised chain, for every board.
  *
- * IPO Ji prints no premium at all for a large share of SME issues -- seven of
- * nine open SME rows on the afternoon this was written -- and those rows showed
- * an em dash, which reads as "unknown" whether the truth is "not quoted" or
- * "quoted at zero". IPO Watch has figures for them.
+ * This replaces a split where the calendar source's own premium was taken as
+ * authoritative and a second tracker only filled the gaps. That made the
+ * *board* decide the source in practice -- IPO Ji quotes almost no SME, so SME
+ * rows came from IPO Watch and mainboard rows from IPO Ji -- and two rows in
+ * one list could not then be compared with each other.
  *
- * Values only, and only onto rows that already exist. The fallback never adds an
- * IPO, so it cannot reintroduce the duplicates that made this pipeline
- * single-source: IPO Watch calls one issue "NSE" and IPO Ji "National Stock
- * Exchange of India", and as a row source that is two IPOs.
+ * So the calendar's premium is cleared first and re-resolved like any other:
+ * every row goes through the same chain in the same order whatever its board.
+ * Measured live, IPO Watch quoted 15 of 15 SME issues against IPO Ji's 2, and
+ * the two tied at 11 of 25 on mainboard, so IPO Watch leads and IPO Ji is the
+ * second link rather than the default.
  *
- * Only the premium itself is borrowed. The percentage and the indicative listing
- * price are recomputed from *our* price band, because the two trackers disagree
- * on value where both quote (Maharaja: ₹12 against ₹30) and a row carrying one
- * source's premium beside another's derived percentage would be arithmetic no
- * one published. Each row records which tracker its premium came from.
+ * Three rules hold regardless of which link answers:
+ *
+ *   - Values only. A source here never adds, renames or removes an IPO -- the
+ *     calendar alone decides what exists -- so the chain cannot duplicate a row
+ *     however long it gets.
+ *   - Only the premium is taken. The percentage and the indicative listing
+ *     price are recomputed from *our* price band, because the trackers disagree
+ *     (Spectraa: ₹45 against ₹67) and pairing one's premium with another's
+ *     arithmetic would print a number nobody published.
+ *   - Each row records which tracker answered, so a mixed list is still honest
+ *     row by row.
+ *
+ * `preloaded` lets the calendar source's already-fetched records serve as its
+ * own link without a second request; `injected` is for tests.
  */
-export async function applyFallbackGmp(records, injected) {
+export async function resolveGmp(records, { preloaded = {}, injected } = {}) {
+  // What the calendar carried, kept so its source can still act as a link.
+  const carried = new Map();
+  for (const r of records) {
+    if (r.gmp !== null && r.gmp !== undefined) {
+      carried.set(r.slug, { slug: r.slug, name: r.name, gmp: r.gmp });
+    }
+    r.gmp = null;
+    r.estGainPct = null;
+    r.estListingPrice = null;
+    r.gmpSource = null;
+  }
+  const pools = { ...preloaded, [config.gmp.calendarSource]: [...carried.values()] };
+
   const chain = injected
     ? [{ id: injected.meta?.id ?? 'injected', source: injected }]
-    : config.gmp.fallbackSources.filter((id) => SOURCES[id]).map((id) => ({ id, source: SOURCES[id] }));
+    : config.gmp.sources
+        .filter((id) => SOURCES[id] || pools[id])
+        .map((id) => ({ id, source: SOURCES[id] }));
 
   const byId = {};
-  let filled = 0;
+  let resolved = 0;
 
   for (const { id, source } of chain) {
-    // Recomputed each pass: earlier links in the chain have already filled what
-    // they could, so a later one is only asked about what is still missing --
-    // and is skipped entirely once nothing is.
-    const missing = records.filter((r) => r.gmp === null || r.gmp === undefined);
+    // Only what is still unanswered: an earlier link always wins, and a link
+    // is skipped entirely once nothing is left for it.
+    const missing = records.filter((r) => r.gmp === null);
     if (!missing.length) break;
 
-    let candidates;
-    try {
-      candidates = await source.fetchGmp();
-    } catch (err) {
-      // One link being down must not stop the next, and must not cost the
-      // primary rows anything.
-      logger.warn('gmp fallback unavailable', { source: id, message: err.message });
-      continue;
+    let candidates = pools[id];
+    if (!candidates) {
+      try {
+        candidates = await source.fetchGmp();
+      } catch (err) {
+        // A tracker being down costs its link, never the rows.
+        logger.warn('gmp source unavailable', { source: id, message: err.message });
+        continue;
+      }
     }
 
     const pool = candidates
@@ -85,10 +111,6 @@ export async function applyFallbackGmp(records, injected) {
       const gmp = pool.find((c) => c.slug === hit.slug)?.gmp;
       if (gmp === undefined) continue;
 
-      // Only the premium is borrowed. The percentage and the indicative listing
-      // price are recomputed from OUR band, so the three figures on a row are
-      // always arithmetically consistent with each other whichever tracker the
-      // premium came from.
       const cap = capPrice(row.priceBand);
       row.gmp = gmp;
       row.gmpSource = id;
@@ -97,16 +119,16 @@ export async function applyFallbackGmp(records, injected) {
       fromThis++;
     }
     if (fromThis) byId[id] = fromThis;
-    filled += fromThis;
+    resolved += fromThis;
   }
 
-  return { filled, byId, chain: chain.map((c) => c.id) };
+  return { resolved, byId, chain: chain.map((c) => c.id) };
 }
 
-/** Position in the configured priority order; unconfigured sources sort last. */
+// Rows now only ever come from the calendar source, so this is a safety net for
+// a database still holding rows from a source that has since been retired.
 function sourceRank(id) {
-  const i = config.gmp.sources.indexOf(id);
-  return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+  return id === config.gmp.calendarSource ? 0 : 1;
 }
 
 // Fields that are one source's quote and only make sense together. Taking the
@@ -151,34 +173,34 @@ export function mergeBySlug(rows) {
 }
 
 /**
- * Fetch every configured source. Returns { records, sources } where sources
- * reports per-source ok/error/count so the caller can surface partial results.
+ * The calendar: every IPO that exists, from exactly one source.
+ *
+ * Only `calendarSource` is fetched here. It used to iterate the GMP source list,
+ * which meant adding a tracker for its premiums also added it as a row source --
+ * and two row sources put the same issue in the list twice whenever they named
+ * it differently. Premiums are a separate pass (`resolveGmp`); this decides what
+ * exists, and nothing else can.
+ *
+ * The per-source outcome shape is kept so callers can still report a failure,
+ * even though the list is now always one entry long.
  */
 export async function fetchAll({ ref = new Date() } = {}) {
-  const wanted = config.gmp.sources.filter((id) => SOURCES[id]);
-  const results = await Promise.allSettled(
-    wanted.map((id) => SOURCES[id].fetchGmp({ ref }).then((records) => ({ id, records })))
-  );
-
-  const records = [];
-  const sources = [];
-  for (const [i, r] of results.entries()) {
-    const id = wanted[i];
-    if (r.status === 'fulfilled') {
-      records.push(...r.value.records);
-      sources.push({ id, ok: true, count: r.value.records.length });
-    } else {
-      // undici puts the transport failure on `cause` and leaves the outer
-      // message generic, so logging only `message` produced entries that said a
-      // source had failed without saying how -- a timeout and a 403 read the
-      // same, which is the difference between "be patient" and "stop asking".
-      logger.error('gmp source failed', {
-        source: id,
-        message: r.reason?.message || r.reason?.name || 'unknown error',
-        cause: r.reason?.cause?.code ?? r.reason?.cause?.message ?? null,
-      });
-      sources.push({ id, ok: false, error: r.reason?.message ?? 'unknown error' });
-    }
+  const id = config.gmp.calendarSource;
+  const source = SOURCES[id];
+  if (!source) {
+    logger.error('calendar source unknown', { source: id, known: Object.keys(SOURCES).join(',') });
+    return { records: [], sources: [{ id, ok: false, error: `unknown source "${id}"` }] };
   }
-  return { records, sources };
+
+  try {
+    const records = await source.fetchGmp({ ref });
+    return { records, sources: [{ id, ok: true, count: records.length }] };
+  } catch (err) {
+    logger.error('calendar source failed', {
+      source: id,
+      message: err.message || err.name || 'unknown error',
+      cause: err.cause?.code ?? err.cause?.message ?? null,
+    });
+    return { records: [], sources: [{ id, ok: false, error: err.message ?? 'unknown error' }] };
+  }
 }

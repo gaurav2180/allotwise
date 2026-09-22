@@ -1,11 +1,16 @@
 #!/usr/bin/env node
-// Pulls GMP + calendar data from the configured GMP sources into market_ipos.
+// Fills market_ipos, in two passes with different jobs.
 //
-// Run on a schedule (every 30-60 min during market hours is plenty -- GMP does
-// not move faster than that). Upserts by (source, slug) and records a GMP
-// history point whenever a value changes.
+//   fetchAll    the calendar: which IPOs exist and every published fact about
+//               them. Exactly one source, because a second one renames issues
+//               and the list doubles.
+//   resolveGmp  the premium, from a prioritised chain, the same chain for every
+//               board. Values only, onto rows the calendar has already created.
+//
+// Run every 30-60 min during market hours; GMP does not move faster than that.
+// Upserts by (source, slug) and records a history point whenever a value moves.
 
-import { fetchAll, applyFallbackGmp } from '../src/gmp/index.js';
+import { fetchAll, resolveGmp } from '../src/gmp/index.js';
 import { upsertMarketIpo, updateMarketMeta, recordSyncRun } from '../src/db/index.js';
 import { logger } from '../src/lib/logger.js';
 
@@ -13,9 +18,9 @@ async function main() {
   try {
     const { records, sources } = await fetchAll();
 
-    // Rows the primary source carries but does not quote a premium for. Values
-    // only -- this never adds an IPO, so it cannot duplicate one.
-    const fallback = await applyFallbackGmp(records);
+    // Every row's premium, re-resolved from the chain -- including rows the
+    // calendar quoted itself, so the board never decides the tracker.
+    const gmp = await resolveGmp(records);
 
     let inserted = 0;
     let updated = 0;
@@ -63,9 +68,9 @@ async function main() {
       inserted,
       updated,
       details,
-      gmpFilled: fallback.filled,
-      gmpFallback: Object.entries(fallback.byId).map(([k, v]) => `${k}:${v}`).join(',') || 'none',
-      sources: sources.map((s) => `${s.id}:${s.ok ? s.count : 'FAIL'}`).join(','),
+      gmpResolved: gmp.resolved,
+      gmpBy: Object.entries(gmp.byId).map(([k, v]) => `${k}:${v}`).join(',') || 'none',
+      calendar: sources.map((s) => `${s.id}:${s.ok ? s.count : 'FAIL'}`).join(','),
     });
     // Non-zero exit only if every source failed -- partial success is success.
     if (failed.length === sources.length && sources.length > 0) process.exitCode = 1;

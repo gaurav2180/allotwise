@@ -37,17 +37,20 @@ function ensureMarketColumns(d) {
   }
 }
 
-// Rows from a source that is no longer configured. Dropping a source from
-// GMP_SOURCES stops new rows arriving but leaves the old ones sitting in the
-// table, and they keep showing up in the list -- which is exactly the duplicate
-// the single-source decision was meant to end, surviving the decision. Nothing
-// here is anyone's data: every row is rebuilt from the live source on the next
-// sync, so removing a stale one costs a few minutes of staleness at worst.
+// Rows from a source that no longer supplies the calendar. Switching the
+// calendar source stops new rows arriving but leaves the old ones in the table,
+// and they keep showing up in the list -- the duplicate outliving the decision
+// to stop making it. Nothing here is anyone's data: every row is rebuilt from
+// the live source on the next sync, so removing a stale one costs minutes of
+// staleness at worst.
+//
+// Keyed on the calendar source alone, not the premium chain: a tracker that
+// only fills values never owns a row, so its presence in GMP_SOURCES must not
+// keep dead rows alive.
 function dropUnconfiguredSources(d) {
-  const wanted = config.gmp.sources;
-  if (!wanted.length) return; // Misconfiguration; emptying the table is worse.
-  const placeholders = wanted.map(() => '?').join(', ');
-  d.prepare(`DELETE FROM market_ipos WHERE source NOT IN (${placeholders})`).run(...wanted);
+  const keep = config.gmp.calendarSource;
+  if (!keep) return; // Misconfiguration; emptying the table is worse.
+  d.prepare('DELETE FROM market_ipos WHERE source != ?').run(keep);
 }
 
 // Issue size must be the rupee amount a source published, never a share count.
@@ -177,7 +180,7 @@ export function upsertMarketIpo(rec) {
       rec.status, rec.sourceUpdatedAt ?? null, rec.gmpSource ?? rec.source, existing.id
     );
     const changed = (existing.gmp ?? null) !== (rec.gmp ?? null);
-    if (changed) recordGmpHistory(rec.source, rec.slug, rec.gmp ?? null);
+    if (changed) recordGmpHistory(rec.gmpSource ?? rec.source, rec.slug, rec.gmp ?? null);
     return { action: changed ? 'updated' : 'unchanged' };
   }
 
@@ -192,7 +195,7 @@ export function upsertMarketIpo(rec) {
     rec.openDate ?? null, rec.closeDate ?? null, rec.status, rec.sourceUpdatedAt ?? null,
     rec.gmpSource ?? rec.source
   );
-  recordGmpHistory(rec.source, rec.slug, rec.gmp ?? null);
+  recordGmpHistory(rec.gmpSource ?? rec.source, rec.slug, rec.gmp ?? null);
   return { action: 'inserted' };
 }
 

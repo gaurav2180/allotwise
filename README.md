@@ -195,41 +195,59 @@ The tracker side (`/calendar`, `/gmp`) is fed by `market_ipos`, populated by
 `{ meta, fetchGmp }` and is isolated: a parse failure in one source is reported
 per-source and never sinks the others (`fetchAll` uses `Promise.allSettled`).
 
-**One source, on purpose.** `GMP_SOURCES` defaults to `ipoji` alone.
+**Two jobs, two settings.** Sourcing is split because the source with the best
+facts is not the source with the best grey-market coverage.
 
-Running two trackers side by side put the same IPO in the list twice whenever
-they named it differently: IPO Watch called one issue **"NSE"**, IPO Ji called it
-**"National Stock Exchange of India"**. Those share no slug and no name token, so
-`mergeBySlug` (which keys on the slug) cannot see they are one company, and
-neither can the fuzzy name matcher used for registrar links — it scores that pair
-at **zero**. Short of a hand-maintained alias table, deduplicating after the fact
-will always leak. One source cannot disagree with itself.
+| | setting | job |
+| --- | --- | --- |
+| Calendar | `GMP_CALENDAR_SOURCE` (default `ipoji`) | which IPOs exist, and every published fact: dates, price band, lot size, issue size, minimum application, listing price, logo, board |
+| Premium | `GMP_SOURCES` (default `ipowatch,ipoji`) | the grey market premium, tried left to right |
 
-- **IPO Ji** (`src/gmp/ipoji.js`) reads two pages. `/ipo` is the calendar: every
-  current, upcoming and recently-listed issue as a card with name, ISO
-  `<time datetime>` open/close dates, board, full price band, lot size, issue
-  size and expected premium. `/ipo-gmp` carries just the premium, requoted far
-  more often, and is overlaid on top. Status comes from the dates, because the
-  card's own badge says "current" for both open and closed.
-- **IPO Watch** (`src/gmp/ipowatch.js`) is still in the registry and still
-  parses, so `GMP_SOURCES=ipowatch` works — but it is not enabled. It publishes
-  only the cap price rather than the band, an issue size as a share count, and
-  dates like `28-1 Sept` whose year and month boundary have to be inferred. It
-  also went down for a day: timing out from the deployed host and serving
-  Cloudflare 522s elsewhere.
+**Exactly one calendar source, enforced at boot.** Two sources name the same
+company differently — IPO Watch calls one issue **"NSE"**, IPO Ji calls it
+**"National Stock Exchange of India"** — and those share no slug and no name
+token, so `mergeBySlug` sees two IPOs and the fuzzy matcher scores the pair at
+**zero**. The issue then appears twice and nothing downstream can fix it. The
+process refuses to start if `GMP_CALENDAR_SOURCE` contains a comma.
 
-Rows from a source no longer listed in `GMP_SOURCES` are **deleted on the next
-start** (`src/db/index.js`). Dropping a source otherwise leaves its rows in
-`market_ipos` and they keep appearing in the list — the duplicate outliving the
-decision to stop creating it. Nothing is lost: every row is rebuilt from the live
-source on the next sync.
+**Any number of premium sources, safely.** `resolveGmp` only ever fills a value
+onto a row the calendar has already created — it cannot add, rename or remove an
+IPO — so the chain's length is free. A link that is down, or that does not carry
+an issue, falls through to the next.
 
-`mergeBySlug` in `src/gmp/index.js` still collapses per-source rows for the list
-endpoints, for anyone who does run two. When it fires, the highest-priority
-source *that actually quotes a premium* wins and its quote is taken whole —
-mixing one tracker's premium with another's indicative price would produce a
-number neither published. `?source=` bypasses the merge. Treat it as a safety
-net for the easy cases, not as a reason to add a second source.
+**The same chain for every board.** This is the point of the split. Sourcing
+used to treat the calendar's own premium as authoritative and let a second
+tracker fill gaps, which in practice made the *board* pick the tracker: IPO Ji
+quotes almost no SME, so SME rows came from IPO Watch and mainboard rows from
+IPO Ji, and two rows in one list could not be compared. `resolveGmp` now clears
+the calendar's premium and re-resolves every row through one chain.
+
+IPO Watch leads it on measurement, not preference — counted on one live board:
+
+| board | rows | IPO Ji quoted | IPO Watch quoted |
+| --- | --- | --- | --- |
+| mainboard | 25 | 11 | 11 |
+| SME | 15 | **2** | **15** |
+
+**Only the premium is borrowed.** The percentage and the indicative listing price
+are recomputed from *our* price band, because the trackers disagree on value
+(Spectraa: ₹45 against ₹67) and pairing one's premium with another's arithmetic
+would print a number nobody published. Each row records which tracker answered
+(`gmp_source`), so a mixed list stays honest row by row.
+
+**GMP has no authoritative source.** It is not published by SEBI or the
+exchanges — every site polls its own dealers, which is why the figures differ.
+Rows are stamped with their source and the response carries an `attribution`
+array; surface it.
+
+Rows whose `source` is no longer the calendar source are deleted at startup.
+Dropping a source otherwise leaves its rows in `market_ipos`, still appearing in
+the list — the duplicate outliving the decision to stop making it.
+
+Adding a source is one entry in the `SOURCES` registry in `src/gmp/index.js`
+plus an adapter exposing `{ meta, fetchGmp }`. Two candidates were rejected on
+inspection: InvestorGain serves its table from Next.js payload chunks, and IPO
+Bazar renders GMP client-side, so neither is readable from the HTML.
 
 **GMP is unofficial** grey-market data. Every record is stamped with `source`
 and the site's own "last updated" text, and every response carries an
