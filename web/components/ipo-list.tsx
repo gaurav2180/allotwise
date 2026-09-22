@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { FilterTabs, type TabOption } from "@/components/filter-tabs";
+import { Select } from "@/components/ui/select";
 import { IpoRow, IpoListHeader } from "@/components/ipo-row";
 import {
   ListSkeleton,
@@ -221,26 +222,7 @@ export function IpoList() {
             wrapped badly on a phone — it now rides the PANs nav item, which is
             both always visible and the place you would go to act on it. */}
         <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-1.5" role="group" aria-label="Filter by board">
-            {BOARDS.map((b) => {
-              const active = board === b.value;
-              return (
-                <button
-                  key={b.value}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => setBoard(b.value)}
-                  className={`inline-flex min-h-8 items-center rounded-pill border px-3 text-[12px] font-medium transition-colors duration-150 sm:min-h-0 sm:px-3 sm:py-1 ${
-                    active
-                      ? "border-transparent bg-chip text-text"
-                      : "border-border text-dim hover:text-text"
-                  }`}
-                >
-                  {b.label}
-                </button>
-              );
-            })}
-          </div>
+          <Select value={board} onChange={setBoard} options={BOARDS} label="Filter by board" />
 
           {isSearching && (
             <p className="text-[12px] text-dim" aria-live="polite">
