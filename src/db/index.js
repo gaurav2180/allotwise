@@ -199,6 +199,36 @@ export function upsertMarketIpo(rec) {
   return { action: 'inserted' };
 }
 
+/**
+ * Drop the premium from rows this sync's calendar no longer carries.
+ *
+ * A row that has fallen off the calendar is never re-resolved, so it keeps
+ * whatever premium it last had -- forever, and computed by whatever rules were
+ * in force at the time. Four such rows survived a sourcing change with rounded
+ * percentages that no longer matched their own band (₹210 on a ₹1,785 cap shown
+ * as 12% rather than 11.76%), which reads as an arithmetic bug in the live list
+ * rather than as the stale record it is.
+ *
+ * The facts stay: name, dates, band, issue size, listing price. Those were true
+ * when published and remain true. Only the forecast is cleared, because a
+ * forecast nobody is updating is not a forecast.
+ *
+ * Callers must pass the slugs from a SUCCESSFUL fetch. On a failed one the set
+ * is empty and this would wipe every premium in the table.
+ */
+export function clearStaleGmp(liveSlugs) {
+  if (!liveSlugs?.length) return 0;
+  const placeholders = liveSlugs.map(() => '?').join(', ');
+  return getDb()
+    .prepare(
+      `UPDATE market_ipos
+          SET gmp = NULL, est_gain_pct = NULL, est_listing_price = NULL, gmp_source = NULL
+        WHERE slug NOT IN (${placeholders})
+          AND (gmp IS NOT NULL OR est_gain_pct IS NOT NULL OR est_listing_price IS NOT NULL)`
+    )
+    .run(...liveSlugs).changes;
+}
+
 export function recordGmpHistory(source, slug, gmp) {
   getDb()
     .prepare('INSERT INTO gmp_history (source, slug, gmp) VALUES (?, ?, ?)')

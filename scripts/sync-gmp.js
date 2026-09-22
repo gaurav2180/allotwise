@@ -11,7 +11,7 @@
 // Upserts by (source, slug) and records a history point whenever a value moves.
 
 import { fetchAll, resolveGmp } from '../src/gmp/index.js';
-import { upsertMarketIpo, updateMarketMeta, recordSyncRun } from '../src/db/index.js';
+import { upsertMarketIpo, updateMarketMeta, recordSyncRun, clearStaleGmp } from '../src/db/index.js';
 import { logger } from '../src/lib/logger.js';
 
 async function main() {
@@ -62,6 +62,11 @@ async function main() {
       });
     }
 
+    // Rows that have fallen off the calendar keep their facts but lose their
+    // premium: nothing re-resolves them, so it would sit there indefinitely.
+    // Guarded on a successful fetch -- an empty list here would clear the table.
+    const staleCleared = sources.every((s) => s.ok) ? clearStaleGmp(records.map((r) => r.slug)) : 0;
+
     const failed = sources.filter((s) => !s.ok);
     logger.info('gmp sync complete', {
       seen: records.length,
@@ -70,6 +75,7 @@ async function main() {
       details,
       gmpResolved: gmp.resolved,
       gmpBy: Object.entries(gmp.byId).map(([k, v]) => `${k}:${v}`).join(',') || 'none',
+      staleCleared,
       calendar: sources.map((s) => `${s.id}:${s.ok ? s.count : 'FAIL'}`).join(','),
     });
     // Non-zero exit only if every source failed -- partial success is success.
