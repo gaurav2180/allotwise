@@ -6,6 +6,7 @@ import {
   ArrowClockwiseIcon,
   ArrowSquareOutIcon,
   CaretDownIcon,
+  ClockIcon,
   SealCheckIcon,
   CurrencyInrIcon,
   TrendUpIcon,
@@ -23,6 +24,7 @@ import {
   allotmentOut,
   cn,
   derivePhase,
+  describeAllotmentDate,
   formatDate,
   formatPriceBand,
   inr,
@@ -330,10 +332,12 @@ function ExpandedBody({
   panStoreReady: boolean;
   check: ReturnType<typeof useAllotmentCheck>;
 }) {
-  // Not every IPO can be checked in-app — only KFintech and MUFG Intime issues
-  // once they appear in the registrar's own list. For the rest, the registrar's
-  // official status page is the next best thing, so link straight to it rather
-  // than leaving a dead end.
+  const [notice, setNotice] = useState(false);
+
+  // Not every IPO can be checked in-app — only issues in a registrar we query,
+  // once that registrar lists them. For the rest, the registrar's official
+  // status page is the next best thing, so link straight to it rather than
+  // leaving a dead end.
   if (!ipo.allotment.available) {
     const reg = ipo.registrar;
     if (!reg?.url) {
@@ -344,8 +348,13 @@ function ExpandedBody({
         </p>
       );
     }
-    const today = new Date().toISOString().slice(0, 10);
-    const due = ipo.allotmentDate && ipo.allotmentDate > today ? ipo.allotmentDate : null;
+    // Before the allotment date the registrar's page has nothing to show, so
+    // the button says so here instead of sending someone away to find out.
+    const notOut = !allotmentOut(ipo);
+    const due = notOut && ipo.allotmentDate ? ipo.allotmentDate : null;
+    const buttonClass =
+      "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border px-3 text-[12px] font-medium";
+    const buttonStyle = { background: "var(--btn-bg)", color: "var(--btn-text)", borderColor: "var(--btn-border)" };
     return (
       <div
         className="mt-3 rounded-card border border-border p-3"
@@ -363,20 +372,55 @@ function ExpandedBody({
               </span>
               Check allotment
             </h3>
-            {due && <p className="mt-1.5 text-[12px] text-dim">Allotment expected {formatDate(due)}</p>}
+            {due && !notice && <p className="mt-1.5 text-[12px] text-dim">Allotment expected {formatDate(due)}</p>}
           </div>
-          <a
-            href={reg.url}
-            aria-label="Check PAN (opens the registrar's site in a new tab)"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border px-3 text-[12px] font-medium"
-            style={{ background: "var(--btn-bg)", color: "var(--btn-text)", borderColor: "var(--btn-border)" }}
-          >
-            Check PAN
-            <ArrowSquareOutIcon size={12} weight="bold" aria-hidden />
-          </a>
+          {notOut ? (
+            <button
+              type="button"
+              aria-expanded={notice}
+              onClick={() => setNotice((v) => !v)}
+              className={buttonClass}
+              style={buttonStyle}
+            >
+              Check PAN
+            </button>
+          ) : (
+            <a
+              href={reg.url}
+              aria-label="Check PAN (opens the registrar's site in a new tab)"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClass}
+              style={buttonStyle}
+            >
+              Check PAN
+              <ArrowSquareOutIcon size={12} weight="bold" aria-hidden />
+            </a>
+          )}
         </div>
+
+        {notOut && notice && (
+          <div
+            role="status"
+            className="aw-page-fade-in mt-3 flex items-start gap-3 rounded-control border border-border bg-surface p-3"
+          >
+            <span
+              className="grid size-7 shrink-0 place-items-center rounded-control"
+              style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+              aria-hidden
+            >
+              <ClockIcon size={15} weight="bold" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium">Allotment isn&rsquo;t out yet</div>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
+                {ipo.allotmentDate
+                  ? `It is expected ${describeAllotmentDate(ipo.allotmentDate)}. Results are published that day, so check back then.`
+                  : "The date hasn’t been announced yet. It will show here once the issue’s dates are out."}
+              </p>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

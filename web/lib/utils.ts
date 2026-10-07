@@ -122,7 +122,31 @@ export function formatLongDate(iso: string | null | undefined): string {
  * whether or not Allotwise can query the registrar itself.
  */
 export function allotmentOut(ipo: { allotmentDate?: string | null }, now = new Date()): boolean {
-  return Boolean(ipo.allotmentDate && ipo.allotmentDate <= now.toISOString().slice(0, 10));
+  return Boolean(ipo.allotmentDate && ipo.allotmentDate <= localDate(now));
+}
+
+/**
+ * The reader's own calendar date, as YYYY-MM-DD. Not `toISOString`, which is
+ * UTC: for anyone in India that is still yesterday until 5:30 in the morning,
+ * so an allotment due today would have read as "tomorrow" overnight.
+ */
+export function localDate(d = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * "tomorrow (Thu, 9 Oct)", "in 3 days (Sun, 12 Oct)", or just "Fri, 16 Oct"
+ * when it is further off — the relative word is the thing a reader wants
+ * inside a week, and the date is the thing they want beyond it.
+ */
+export function describeAllotmentDate(iso: string, now = new Date()): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  const dated = d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const days = Math.round((d.getTime() - today) / 86_400_000);
+  if (days === 1) return `tomorrow (${dated})`;
+  if (days > 1 && days <= 7) return `in ${days} days (${dated})`;
+  return dated;
 }
 
 export type Phase = "upcoming" | "open" | "closed";

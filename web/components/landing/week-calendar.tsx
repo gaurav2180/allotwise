@@ -1,6 +1,8 @@
 "use client";
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { IpoHoverCard, type HoverTarget } from "@/components/landing/ipo-hover-card";
 import { useIpos } from "@/hooks/use-ipos";
 import type { IpoListItem } from "@/lib/schemas";
 import { cn } from "@/lib/utils";
@@ -37,12 +39,20 @@ function eventsByDay(ipos: IpoListItem[], days: string[]) {
   return map;
 }
 
-function Chip({ e }: { e: Event }) {
+type Hover = { enter: (e: Event, el: HTMLElement) => void; leave: () => void };
+
+function Chip({ e, hover }: { e: Event; hover?: Hover }) {
   return (
     <Link
       href="/app"
-      className="flex items-center gap-2 rounded-control px-2 py-1.5 transition-colors duration-150 hover:bg-row-hover"
-      title={`${KINDS.find((k) => k.kind === e.kind)!.label}: ${e.ipo.name}`}
+      // The card shows the same facts as the title would, so it replaces it
+      // wherever it is wired; the plain title stays for the phone agenda.
+      title={hover ? undefined : `${KINDS.find((k) => k.kind === e.kind)!.label}: ${e.ipo.name}`}
+      onMouseEnter={hover ? (ev) => hover.enter(e, ev.currentTarget) : undefined}
+      onMouseLeave={hover?.leave}
+      onFocus={hover ? (ev) => hover.enter(e, ev.currentTarget) : undefined}
+      onBlur={hover?.leave}
+      className="flex items-center gap-2 rounded-control px-2 py-1.5 transition-[background-color,transform] duration-150 hover:bg-row-hover hover:translate-x-0.5 focus-visible:bg-row-hover"
     >
       {e.ipo.logo ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -69,6 +79,44 @@ function Chip({ e }: { e: Event }) {
  */
 export function WeekCalendar() {
   const { data, isPending, isError } = useIpos();
+
+  // One card shared by every entry. A short delay before it opens keeps it from
+  // flickering as the cursor crosses the grid; it closes a beat after leaving,
+  // so moving between neighbours reads as one card sliding rather than two.
+  const [target, setTarget] = useState<HoverTarget | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const closeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const hover: Hover = {
+    enter: useCallback((e: Event, el: HTMLElement) => {
+      clearTimeout(closeTimer.current);
+      const k = KINDS.find((x) => x.kind === e.kind)!;
+      const show = () =>
+        setTarget({ ipo: e.ipo, label: k.label, color: k.color, step: e.kind, rect: el.getBoundingClientRect() });
+      clearTimeout(openTimer.current);
+      // Switching between entries is immediate; the first open waits.
+      if (target) show();
+      else openTimer.current = setTimeout(show, 90);
+    }, [target]),
+    leave: useCallback(() => {
+      clearTimeout(openTimer.current);
+      closeTimer.current = setTimeout(() => setTarget(null), 100);
+    }, []),
+  };
+
+  // A card anchored to a position that has since moved would float in the
+  // wrong place, so scrolling or Escape simply dismisses it.
+  useEffect(() => {
+    if (!target) return;
+    const close = () => setTarget(null);
+    const key = (ev: KeyboardEvent) => ev.key === "Escape" && close();
+    window.addEventListener("scroll", close, { passive: true });
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("scroll", close);
+      window.removeEventListener("keydown", key);
+    };
+  }, [target]);
 
   const now = new Date();
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -137,7 +185,7 @@ export function WeekCalendar() {
                   {isPending &&
                     [0, 1].map((k) => <div key={k} className="aw-skeleton h-9 rounded-control" />)}
                   {events.map((e) => (
-                    <Chip key={`${e.kind}-${e.ipo.slug}`} e={e} />
+                    <Chip key={`${e.kind}-${e.ipo.slug}`} e={e} hover={hover} />
                   ))}
                   {data && events.length === 0 && (
                     <span className="m-auto text-[11px] text-dim/60">—</span>
@@ -148,6 +196,8 @@ export function WeekCalendar() {
           })}
         </ol>
       </div>
+
+      {target && <IpoHoverCard target={target} />}
 
       {isError && (
         <p className="mt-3 text-[13px]" style={{ color: "var(--negative)" }}>
