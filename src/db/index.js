@@ -352,6 +352,43 @@ export function getMarketIpoBySlug(slug) {
     .map(marketRowToApi);
 }
 
+export function getAlertState(key) {
+  const row = getDb()
+    .prepare(
+      `SELECT value, CAST((strftime('%s','now') - strftime('%s', updated_at)) / 60 AS INTEGER) AS ageMinutes
+         FROM alert_state WHERE key = ?`
+    )
+    .get(key);
+  return row ? { value: row.value, ageMinutes: row.ageMinutes } : null;
+}
+
+export function setAlertState(key, value) {
+  getDb()
+    .prepare(
+      `INSERT INTO alert_state (key, value, updated_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`
+    )
+    .run(key, String(value));
+}
+
+/**
+ * The latest run of every sync and self-test, with its age and the last time
+ * it succeeded -- what lets /health say that a source has gone quiet instead
+ * of leaving someone to notice a missing button.
+ */
+export function latestSyncRuns() {
+  return getDb()
+    .prepare(
+      `SELECT s.registrar, s.ok, s.seen, s.error,
+              CAST((strftime('%s','now') - strftime('%s', s.ran_at)) / 60 AS INTEGER) AS ageMinutes,
+              (SELECT CAST((strftime('%s','now') - strftime('%s', MAX(g.ran_at))) / 60 AS INTEGER)
+                 FROM sync_runs g WHERE g.registrar = s.registrar AND g.ok = 1) AS lastOkMinutes
+         FROM sync_runs s
+         JOIN (SELECT registrar, MAX(id) AS mid FROM sync_runs GROUP BY registrar) m ON s.id = m.mid`
+    )
+    .all();
+}
+
 /** Store an issue's day-wise GMP table, as read from its page. */
 export function saveDaywise(slug, points) {
   return getDb()

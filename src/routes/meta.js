@@ -4,6 +4,7 @@ import { supportedRegistrars } from '../registrars/index.js';
 import { cacheStats } from '../lib/cache.js';
 import { rateLimitStats } from '../lib/rateLimit.js';
 import { config } from '../config.js';
+import { coverage, registrarHealth } from '../lib/coverage.js';
 
 export const metaRouter = Router();
 
@@ -14,8 +15,28 @@ metaRouter.get('/health', (req, res) => {
   } catch {
     dbOk = false;
   }
+  // Sources going quiet is reported, not fatal: the status code stays tied to
+  // the database alone, so a registrar outage cannot make the platform's health
+  // check restart a perfectly good server.
+  let registrars = null;
+  let allotment = null;
+  let problems = [];
+  if (dbOk) {
+    try {
+      ({ registrars, problems } = registrarHealth());
+      const { issues, ...summary } = coverage();
+      allotment = summary;
+    } catch {
+      problems = ['could not compute registrar health'];
+    }
+  }
+
   res.status(dbOk ? 200 : 503).json({
     ok: dbOk,
+    degraded: problems.length > 0,
+    problems,
+    registrars,
+    allotment,
     uptimeSeconds: Math.round(process.uptime()),
     cache: cacheStats(),
     rateLimit: rateLimitStats(),

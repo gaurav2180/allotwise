@@ -31,8 +31,16 @@ function scrub(value, depth = 0) {
 }
 
 function emit(level, msg, meta = {}) {
-  const line = { ts: new Date().toISOString(), level, msg: scrub(msg), ...scrub(meta) };
+  // `alert: false` opts a line out of the Telegram alert an error otherwise
+  // sends -- for ones another mechanism already reports.
+  const { alert, ...rest } = meta ?? {};
+  const line = { ts: new Date().toISOString(), level, msg: scrub(msg), ...scrub(rest) };
   process.stdout.write(`${JSON.stringify(line)}\n`);
+  if (level === 'error' && alert !== false) {
+    // Dynamic, so the logger stays dependency-free and import-cycle-free, and
+    // fire-and-forget: it is already scrubbed, and must not slow the caller.
+    import('./alerts.js').then((m) => m.notifyError(line)).catch(() => {});
+  }
 }
 
 export const logger = {

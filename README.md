@@ -233,6 +233,29 @@ This closes the loop your question raised: once scheduled, a newly-opened IPO
 appears in `/calendar` and `/ipo/<slug>` on the next cycle — with dates,
 details, GMP and subscription — with no manual step.
 
+## Monitoring and alerts
+
+Sources break without announcing it (KFintech began rejecting requests without
+a browser User-Agent and nothing failed loudly), so the scheduler checks them:
+
+- **Every 15 min** — each registrar's company list and the IPO↔registrar links
+  are refreshed, so a newly published issue is checkable within minutes.
+- **Hourly** — `npm run check:registrars` sends a PAN that matches nobody
+  (`ZZZZZ9999Z`) to every registrar we query and expects "no record". An error
+  means the endpoint, a header rule or the host changed. It also reports every
+  issue whose allotment is out but which is still on a registrar's own site,
+  and why (`not-in-registrar-list` or `registrar-not-supported`).
+- **`GET /health`** returns `degraded`, `problems`, each registrar's list and
+  self-test state, and the coverage summary. Its status code follows the
+  database only, so a registrar outage cannot make the platform restart you.
+
+**Telegram.** Set `TELEGRAM_BOT_TOKEN` (from @BotFather) and `TELEGRAM_CHAT_ID`,
+then `npm run alert:test`. An error logged anywhere is sent once per distinct
+error per `ALERT_REPEAT_MINUTES` (default 360); registrar problems are sent when
+they appear and again as RESOLVED when they clear, never repeated while they
+persist. `ALERTS_DRY_RUN=true` prints messages instead of sending. Never use
+`AAAAA0000A` as a test PAN — registrars hold it on real applicants' records.
+
 ## Canonical IPO identity (registrar ↔ GMP)
 
 A registrar IPO ("ESDS Software Solution Limited - IPO") and a GMP IPO

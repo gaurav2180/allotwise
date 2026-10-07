@@ -578,3 +578,69 @@ test('maashitla lookup: directory, not found, and an allotment', () => {
 
   assert.throws(() => maashitlaInterpret({ status: 500, body: null }), (e) => e.code === 'UPSTREAM_ERROR');
 });
+
+test('coverage maps a registrar name to the module that can query it', async () => {
+  const { registrarModuleFor, linkOutReason } = await import('../src/lib/coverage.js');
+  assert.equal(registrarModuleFor('Kfin Technologies Ltd.'), 'kfintech');
+  assert.equal(registrarModuleFor('MUFG Intime India Pvt.Ltd.'), 'linkintime');
+  assert.equal(registrarModuleFor('Link Intime India Pvt Ltd'), 'linkintime');
+  assert.equal(registrarModuleFor('Bigshare Services Pvt.Ltd.'), 'bigshare');
+  assert.equal(registrarModuleFor('Maashitla Securities Pvt.Ltd.'), 'maashitla');
+  assert.equal(registrarModuleFor('Cameo Corporate Services Ltd.'), null);
+  assert.equal(registrarModuleFor(null), null);
+
+  // One we can query but which has not listed the issue is a gap worth
+  // watching; one we cannot query at all is a different, standing kind.
+  assert.equal(linkOutReason('Bigshare Services Pvt.Ltd.'), 'not-in-registrar-list');
+  assert.equal(linkOutReason('Cameo Corporate Services Ltd.'), 'registrar-not-supported');
+});
+
+test('alerts: errors are described, repeats are throttled, incidents report once and resolve', async () => {
+  const { describeError, claim, reportIncidents, sendTelegram, alertsEnabled } = await import('../src/lib/alerts.js');
+  const { gapIncidents } = await import('../src/lib/coverage.js');
+
+  // The text names what failed and carries the useful fields, not the noise.
+  const text = describeError({ ts: 'x', level: 'error', msg: 'gmp sync failed', message: 'HTTP 503', source: 'investorgain' });
+  assert.match(text, /^ERROR: gmp sync failed\n/);
+  assert.match(text, /message: HTTP 503/);
+  assert.doesNotMatch(text, /\bts:|\blevel:/);
+
+  // Off without credentials: sending is a harmless no-op.
+  const was = { ...config.alerts };
+  Object.assign(config.alerts, { telegramToken: '', telegramChatId: '', dryRun: false });
+  assert.equal(alertsEnabled(), false);
+  assert.equal(await sendTelegram('nothing'), false);
+
+  // The same key is claimed once per window.
+  const key = `test:${Date.now()}:${Math.random()}`;
+  assert.equal(await claim(key, 60), true);
+  assert.equal(await claim(key, 60), false);
+
+  // Incidents: reported when they appear, silent while they persist, then
+  // reported again as resolved. A failed send records nothing, so it retries.
+  config.alerts.dryRun = true;
+  const sent = [];
+  const stateKey = `test-incidents:${Date.now()}:${Math.random()}`;
+  const send = async (m) => (sent.push(m), true);
+  const run = (map, s = send) => reportIncidents(new Map(Object.entries(map)), { send: s, stateKey });
+
+  assert.equal((await run({ 'selftest:kfintech': 'kfintech: self-test failing' })).added, 1);
+  assert.match(sent[0], /^ALERT \(1 new\)\n- kfintech: self-test failing/);
+  assert.equal((await run({ 'selftest:kfintech': 'kfintech: self-test failing' })).sent, false, 'a persisting problem is not repeated');
+  const resolved = await run({});
+  assert.equal(resolved.cleared, 1);
+  assert.match(sent[1], /^RESOLVED \(1\)/);
+
+  const failing = async () => false;
+  await run({ 'list:bigshare': 'bigshare: list stale' }, failing);
+  assert.equal((await run({ 'list:bigshare': 'bigshare: list stale' })).added, 1, 'a failed send is retried next run');
+
+  // Gaps: only issues a day past allotment (the registrar has had time) and
+  // within a week (older history is not worth alerting on forever).
+  const day = (n) => new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+  const issue = (name, d, reason = 'not-in-registrar-list') => ({ name, registrar: 'Bigshare', reason, allotmentDate: d });
+  const gaps = gapIncidents({ issues: [issue('Fresh', day(0)), issue('Due', day(2)), issue('Ancient', day(20)), issue('Elsewhere', day(2), 'registrar-not-supported')] });
+  assert.deepEqual([...gaps.keys()], ['gap:Due']);
+
+  Object.assign(config.alerts, was);
+});

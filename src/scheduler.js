@@ -68,7 +68,7 @@ function runChain(name, files) {
 }
 
 export function startScheduler() {
-  const { registrarsMs, gmpMetaMs, runOnStart } = config.scheduler;
+  const { registrarsMs, gmpMetaMs, registrarListsMs, registrarCheckMs, runOnStart } = config.scheduler;
 
   const jobs = [
     {
@@ -88,6 +88,24 @@ export function startScheduler() {
     },
     // GMP alone, more often than the full chain, so premiums stay fresh.
     { name: 'gmp', every: gmpMetaMs, run: () => runScript('gmp', 'sync-gmp.js') },
+    // The registrars' company lists on their own, much more often than hourly:
+    // a registrar publishes an issue the moment its allotment is final, and
+    // until the next sync after that the issue has no in-app check.
+    {
+      name: 'registrar-lists',
+      every: registrarListsMs,
+      run: () =>
+        runChain('registrar-lists', [
+          'sync-kfintech.js',
+          'sync-linkintime.js',
+          'sync-bigshare.js',
+          'sync-maashitla.js',
+          'link-ipos.js',
+        ]),
+    },
+    // Self-test of every registrar and the coverage report, so a source that
+    // breaks is found by the schedule rather than by a missing button.
+    { name: 'registrar-check', every: registrarCheckMs, run: () => runScript('registrar-check', 'check-registrars.js') },
   ];
 
   const timers = [];
@@ -100,6 +118,8 @@ export function startScheduler() {
   logger.info('scheduler started', {
     registrarsMin: Math.round(registrarsMs / 60000),
     gmpMin: Math.round(gmpMetaMs / 60000),
+    registrarListsMin: Math.round(registrarListsMs / 60000),
+    registrarCheckMin: Math.round(registrarCheckMs / 60000),
     runOnStart,
   });
 

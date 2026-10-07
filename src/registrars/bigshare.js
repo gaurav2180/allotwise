@@ -51,20 +51,20 @@ function release() {
   waiters.shift()?.();
 }
 
-const dataUrl = () => new URL('Data.aspx/FetchIpodetails', config.bigshare.statusPage).toString();
+const dataUrl = (page) => new URL('Data.aspx/FetchIpodetails', page).toString();
 
-async function fetchOnce(companyId, pan) {
+async function fetchOnce(companyId, pan, page) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), config.bigshare.timeoutMs);
   try {
-    const res = await fetch(dataUrl(), {
+    const res = await fetch(dataUrl(page), {
       method: 'POST',
       headers: {
         'User-Agent': UA,
         'Content-Type': 'application/json; charset=utf-8',
         Accept: 'application/json',
-        Origin: new URL(config.bigshare.statusPage).origin,
-        Referer: config.bigshare.statusPage,
+        Origin: new URL(page).origin,
+        Referer: page,
         'X-Requested-With': 'XMLHttpRequest',
       },
       // SelectionType "PN" is the page's "search by PAN".
@@ -120,14 +120,28 @@ export function interpret({ status, body }) {
 export async function queryByPan({ clientId, pan }) {
   await acquire();
   try {
-    let result;
-    try {
-      result = await fetchOnce(clientId, pan);
-    } catch (err) {
-      logger.warn('bigshare request failed', { companyId: clientId, reason: err.name === 'AbortError' ? 'timeout' : 'network' });
-      throw new AppError(504, 'UPSTREAM_TIMEOUT', 'Bigshare did not respond in time.');
+    let lastErr;
+    // A host that is down or erroring hands over to the next. A throttle does
+    // not: Bigshare asked us to wait, and another host is the same service.
+    for (const page of config.bigshare.statusPages) {
+      try {
+        let result;
+        try {
+          result = await fetchOnce(clientId, pan, page);
+        } catch (err) {
+          logger.warn('bigshare request failed', {
+            host: new URL(page).host,
+            reason: err.name === 'AbortError' ? 'timeout' : 'network',
+          });
+          throw new AppError(504, 'UPSTREAM_TIMEOUT', 'Bigshare did not respond in time.');
+        }
+        return interpret(result);
+      } catch (err) {
+        if (err.code === 'UPSTREAM_RATE_LIMITED') throw err;
+        lastErr = err;
+      }
     }
-    return interpret(result);
+    throw lastErr;
   } finally {
     release();
   }

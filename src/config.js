@@ -36,9 +36,22 @@ export const config = {
   },
 
   bigshare: {
-    // Both the seeding source (server-rendered company list) and the base the
-    // FetchIpodetails lookup is resolved against.
-    statusPage: str(process.env.BIGSHARE_STATUS_PAGE, 'https://ipo.bigshareonline.com/ipo_status.html'),
+    // Bigshare serves its status page from several hosts, and they do not carry
+    // the same companies: the plain `ipo` host was still missing four issues
+    // (Acme India, Nityas, Omara, Paramount Syntex) that `ipo1` and `ipo2`
+    // already listed. Each is both the source of the company list and the base
+    // its own FetchIpodetails lookup is resolved against, tried in order, so a
+    // company is only ever looked up on a host that listed it.
+    statusPages: str(
+      process.env.BIGSHARE_STATUS_PAGES,
+      'https://ipo1.bigshareonline.com/ipo_status.html,https://ipo2.bigshareonline.com/ipo_status.html'
+    )
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    get statusPage() {
+      return this.statusPages[0];
+    },
     timeoutMs: num(process.env.BIGSHARE_TIMEOUT_MS, 10000),
     maxConcurrency: num(process.env.BIGSHARE_MAX_CONCURRENCY, 2),
   },
@@ -67,6 +80,19 @@ export const config = {
     detailFetchLimit: num(process.env.GMP_DETAIL_FETCH_LIMIT, 40),
   },
 
+  // Alerts go to Telegram. Both values come from the environment and are never
+  // logged; with either missing, alerting is simply off.
+  alerts: {
+    telegramToken: str(process.env.TELEGRAM_BOT_TOKEN, ''),
+    telegramChatId: str(process.env.TELEGRAM_CHAT_ID, ''),
+    // Prefixed to every message so production and a laptop are distinguishable.
+    label: str(process.env.ALERT_LABEL ?? process.env.RAILWAY_ENVIRONMENT_NAME, isProd ? 'production' : 'local'),
+    // Prints what would be sent instead of sending it.
+    dryRun: (process.env.ALERTS_DRY_RUN ?? 'false') === 'true',
+    // The same error is reported at most once in this window.
+    repeatMinutes: num(process.env.ALERT_REPEAT_MINUTES, 360),
+  },
+
   scheduler: {
     // Auto-run the sync jobs from inside the server process. Off by default so
     // `npm start` stays a pure web server; enable here or run `npm run scheduler`
@@ -75,6 +101,8 @@ export const config = {
     runOnStart: (process.env.SCHEDULER_RUN_ON_START ?? 'true') === 'true',
     registrarsMs: num(process.env.SCHEDULER_REGISTRARS_MS, 60 * 60 * 1000),
     gmpMetaMs: num(process.env.SCHEDULER_GMP_MS, 30 * 60 * 1000),
+    registrarListsMs: num(process.env.SCHEDULER_REGISTRAR_LISTS_MS, 15 * 60 * 1000),
+    registrarCheckMs: num(process.env.SCHEDULER_REGISTRAR_CHECK_MS, 60 * 60 * 1000),
   },
 
   cache: {

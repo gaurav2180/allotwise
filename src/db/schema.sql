@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS sync_runs (
   ran_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- What has already been alerted on, so a problem that persists is reported
+-- once rather than every run, and a repeated error at most once per window.
+CREATE TABLE IF NOT EXISTS alert_state (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- NOTE: there is deliberately no table for lookups, PANs, or results.
 
 -- Market/tracker view of an IPO: calendar + latest GMP snapshot.
