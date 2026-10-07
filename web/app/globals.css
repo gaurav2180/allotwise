@@ -456,6 +456,21 @@
      uses, just applied inline rather than through a class. */
 }
 
+/* Theme switch (components/theme-toggle.tsx): the browser's default cross-fade
+   is replaced by a circular reveal driven from script, so both snapshots sit
+   still and the new one is drawn over the old. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2;
+}
+
 /* One guard, applied globally, rather than per-component opt-outs. */
 @media (prefers-reduced-motion: reduce) {
   *,
