@@ -372,13 +372,14 @@ function ExpandedBody({
           </div>
           <a
             href={reg.url}
+            aria-label={`Check PAN on ${name}'s site (opens in a new tab)`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-control border px-4 text-sm font-medium sm:h-9"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border px-3 text-[12px] font-medium"
             style={{ background: "var(--btn-bg)", color: "var(--btn-text)", borderColor: "var(--btn-border)" }}
           >
-            Check on {name}
-            <ArrowSquareOutIcon size={14} weight="bold" aria-hidden />
+            Check PAN
+            <ArrowSquareOutIcon size={12} weight="bold" aria-hidden />
           </a>
         </div>
       </div>
@@ -398,7 +399,7 @@ function ExpandedBody({
         </p>
         <Link
           href="/pans"
-          className="mt-3 inline-flex h-10 items-center rounded-control border px-4 text-sm font-medium sm:h-9"
+          className="mt-3 inline-flex h-8 items-center rounded-control border px-3 text-[12px] font-medium"
           style={{
             background: "var(--btn-bg)",
             color: "var(--btn-text)",
@@ -433,7 +434,13 @@ function ExpandedBody({
 
         {/* The action sits with the heading rather than after the list: with
             several PANs saved it was otherwise pushed off the bottom. */}
-        <Button variant="primary" size="sm" onClick={() => check.run(pans)} disabled={check.isRunning}>
+        <Button
+          variant="primary"
+          size="sm"
+          className="h-8 px-3 text-[12px] sm:h-8 sm:px-3"
+          onClick={() => check.run(pans)}
+          disabled={check.isRunning}
+        >
           {check.isRunning && (
             <ArrowClockwiseIcon size={14} weight="bold" className="animate-spin" aria-hidden />
           )}

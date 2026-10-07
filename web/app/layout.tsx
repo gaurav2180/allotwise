@@ -19,6 +19,18 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     // suppressHydrationWarning is required by next-themes, which sets the
     // class on <html> before React hydrates.
     <html lang="en" className={fontVariables} suppressHydrationWarning>
+      <head>
+        {/* Starts the IPO list request while the page's JavaScript is still
+            downloading, rather than after it has run — on a phone that is most
+            of the time a skeleton would otherwise be on screen. hooks/use-ipos
+            picks the response up. Only on pages that show the list. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'try{var p=location.pathname;if(p==="/"||p==="/app"||p==="/gmp"){window.__awIpos=fetch("/api/ipos",{cache:"no-store"})}}catch(e){}',
+          }}
+        />
+      </head>
       <body>
         <Providers>{children}</Providers>
       </body>
