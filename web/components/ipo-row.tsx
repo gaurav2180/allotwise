@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useId, useRef } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowClockwiseIcon,
+  ArrowSquareOutIcon,
   CaretDownIcon,
   SealCheckIcon,
   CurrencyInrIcon,
@@ -19,6 +20,7 @@ import { useAccordionHeight } from "@/hooks/use-accordion-height";
 import type { IpoListItem } from "@/lib/schemas";
 import type { PanEntry } from "@/lib/pan";
 import {
+  allotmentOut,
   cn,
   derivePhase,
   formatDate,
@@ -42,7 +44,7 @@ function stateLine(ipo: IpoListItem): string {
     const rel = relativeDay(ipo.listedOn);
     return rel === "today" ? "Listed today" : `Listed ${formatDate(ipo.listedOn)}`;
   }
-  if (ipo.allotment.available) return "Allotment out";
+  if (ipo.allotment.available || allotmentOut(ipo)) return "Allotment out";
 
   // Derived from dates, not the scraped status, which goes stale overnight.
   // "Today" carries no date alongside it — it would just repeat the date the
@@ -175,6 +177,22 @@ export function IpoRow({
   const detailRef = useRef<HTMLDivElement>(null);
   const accordion = useAccordionHeight(open, detailRef);
 
+  // The panel's contents exist only while open, plus long enough to animate
+  // closed. Every collapsed row used to render its full allotment panel —
+  // one PAN line per saved PAN — invisibly, on every visit to the list.
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [closing, setClosing] = useState(false);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    setClosing(!open);
+  }
+  useEffect(() => {
+    if (!closing) return;
+    const t = setTimeout(() => setClosing(false), 350);
+    return () => clearTimeout(t);
+  }, [closing]);
+  const showBody = open || closing;
+
   // Bring the row to the top of the viewport as it opens, so the expanded
   // content actually fits on screen instead of running off the bottom of a
   // row that opened wherever it happened to be scrolled to.
@@ -200,14 +218,14 @@ export function IpoRow({
   const registrarSlug = ipo.allotment.available ? ipo.allotment.ipo : undefined;
   const check = useAllotmentCheck(registrarSlug);
 
-  const gain = ipo.estGainPct ?? 0;
+  // Coloured by the premium's sign, so a quote with no percentage yet (no
+  // price announced) still reads as positive or negative.
+  const gain = ipo.estGainPct ?? ipo.gmp ?? 0;
   const gainColor = gain > 0 ? "var(--positive)" : gain < 0 ? "var(--negative)" : "var(--dim)";
   // The full band when the detail scrape has reached this IPO, else the
   // calendar's cap price. Both go through the same formatter, so a fixed-price
   // issue and a two-ended band render consistently.
   const issuePrice = formatPriceBand(ipo.priceBand);
-  // Listed either way: with a published debut price, or by date alone.
-  const hasListed = Boolean(ipo.listing || ipo.listedOn);
 
   return (
     <div ref={rowRef} className="scroll-mt-3 border-t border-border first:border-t-0">
@@ -257,18 +275,17 @@ export function IpoRow({
             {ipo.listing ? `₹${inr(ipo.listing.issuePrice)}` : (issuePrice ?? "—")}
           </Stat>
 
-          {/* Premium and the gain it implies are one figure, so the percentage
-              sits in brackets beside it. Once an issue has listed the premium is
-              a superseded forecast, so it drops to `dim` — the outcome that
-              replaced it is coloured on the line above. */}
+          {/* One reading for every row, listed or not: the premium and its
+              percentage exactly as the source prints them. */}
           <Stat label="GMP" icon={TrendUpIcon} className={COL.gmp}>
             {ipo.gmp === null ? (
               "—"
-            ) : hasListed ? (
-              <span className="text-dim">₹{inr(ipo.gmp)}</span>
             ) : (
               <span style={{ color: gainColor }}>
-                ₹{inr(ipo.gmp)} <span className="text-[11px]">({signedPct(ipo.estGainPct)})</span>
+                ₹{inr(ipo.gmp)}
+                {ipo.estGainPct !== null && (
+                  <span className="text-[11px]"> ({signedPct(ipo.estGainPct)})</span>
+                )}
               </span>
             )}
           </Stat>
@@ -289,19 +306,13 @@ export function IpoRow({
 
       <div id={panelId} style={accordion.outerStyle} inert={accordion.inert} role="region">
         <div ref={detailRef} style={accordion.innerStyle}>
-          <div className="border-t border-border px-3 pb-3 sm:px-4 sm:pb-4">
-            {/* Allotment first. Checking a result is what the product is for,
-                and it used to sit below the whole detail grid and the GMP
-                chart — past the fold on a phone, which buried the one thing
-                people open a row to do. */}
-            <ExpandedBody ipo={ipo} pans={pans} panStoreReady={panStoreReady} check={check} />
-
-            {/* Only mounted while open, so the detail request is never made for
-                a row nobody looked at. */}
-            {open && (
-              <IpoDetailPanel slug={ipo.slug} gmp={ipo.gmp} gmpSource={ipo.gmpSource} />
-            )}
-          </div>
+          {showBody && (
+            <div className="border-t border-border px-3 pb-3 sm:px-4 sm:pb-4">
+              {/* Allotment first: checking a result is what the product is for. */}
+              <ExpandedBody ipo={ipo} pans={pans} panStoreReady={panStoreReady} check={check} />
+              <IpoDetailPanel ipo={ipo} />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -319,14 +330,58 @@ function ExpandedBody({
   panStoreReady: boolean;
   check: ReturnType<typeof useAllotmentCheck>;
 }) {
-  // Not every IPO is checkable: the backend only maps a registrar once the
-  // issue reaches one. Say so rather than showing a button that cannot work.
+  // Not every IPO can be checked in-app — only KFintech and MUFG Intime issues
+  // once they appear in the registrar's own list. For the rest, the registrar's
+  // official status page is the next best thing, so link straight to it rather
+  // than leaving a dead end.
   if (!ipo.allotment.available) {
+    const reg = ipo.registrar;
+    if (!reg?.url) {
+      return (
+        <p className="pt-3 text-[13px] text-dim">
+          No registrar has published allotment for this IPO yet. It becomes checkable here once one
+          does — usually a day or two after the issue closes.
+        </p>
+      );
+    }
+    const name = (reg.name ?? "the registrar").replace(/\s*(pvt\.?\s*ltd\.?|private limited|limited|ltd\.?)\s*$/i, "");
+    const today = new Date().toISOString().slice(0, 10);
+    const due = ipo.allotmentDate && ipo.allotmentDate > today ? ipo.allotmentDate : null;
     return (
-      <p className="pt-3 text-[13px] text-dim">
-        No registrar has published allotment for this IPO yet. It becomes checkable here once one
-        does — usually a day or two after the issue closes.
-      </p>
+      <div
+        className="mt-3 rounded-card border border-border p-3"
+        style={{ background: "radial-gradient(140% 100% at 100% 0%, var(--accent-soft), var(--surface) 55%)" }}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-2 text-[14px] font-medium">
+              <span
+                className="grid size-6 shrink-0 place-items-center rounded-control"
+                style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                aria-hidden
+              >
+                <SealCheckIcon size={14} weight="bold" />
+              </span>
+              Check allotment
+            </h3>
+            <p className="mt-1.5 text-[12px] text-dim">
+              {due
+                ? `Allotment is expected ${formatDate(due)}. ${name} publishes it on its own site.`
+                : `${name} handles this IPO. Check each PAN on its official status page.`}
+            </p>
+          </div>
+          <a
+            href={reg.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-control border px-4 text-sm font-medium sm:h-9"
+            style={{ background: "var(--btn-bg)", color: "var(--btn-text)", borderColor: "var(--btn-border)" }}
+          >
+            Check on {name}
+            <ArrowSquareOutIcon size={14} weight="bold" aria-hidden />
+          </a>
+        </div>
+      </div>
     );
   }
 

@@ -124,6 +124,26 @@
   --row-bg-hover: color-mix(in oklab, var(--surface) 92%, var(--text));
 }
 
+/* The landing page's closing band: solid gold with dark text in both themes.
+   Every token a child reads is redeclared, including component ones, since
+   those resolve where they are declared. */
+.aw-gold {
+  --text: #15151a;
+  --dim: rgb(21 21 26 / 0.72);
+  --border: rgb(21 21 26 / 0.18);
+  --btn-bg: #15151a;
+  --btn-text: #f5f5f3;
+  --btn-border: transparent;
+  --surface: #fbf6ea;
+  --field-bg: #fbf6ea;
+  color-scheme: light;
+  --field-border: rgb(21 21 26 / 0.22);
+  --positive: #0a4f30;
+  --negative: #7a1f17;
+  background: var(--gold-400);
+  color: var(--text);
+}
+
 /* ============================================================================
    MOTION — transitions.dev values, unchanged.
    Each token exists for one job; see DESIGN.md.
@@ -380,6 +400,50 @@
   .aw-reveal-visible {
     opacity: 1;
     transform: translateY(0);
+  }
+
+  /* Landing ticker: the item list is rendered twice and slides by exactly one
+     copy's width, so the loop seam is invisible. Applied via motion-safe only. */
+  @keyframes aw-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .aw-marquee {
+      animation: aw-marquee var(--marquee-duration, 60s) linear infinite;
+    }
+  }
+  .aw-marquee-host:hover .aw-marquee,
+  .aw-marquee-host:focus-within .aw-marquee {
+    animation-play-state: paused;
+  }
+
+  @keyframes aw-live-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.6;
+    }
+    80%,
+    100% {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+  .aw-live-ping {
+    animation: aw-live-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+
+  /* Horizontal strips that scroll by hand (the landing ticker): swipeable,
+     without a scrollbar track drawn through the middle of the strip. */
+  .aw-no-scrollbar {
+    scrollbar-width: none;
+  }
+  .aw-no-scrollbar::-webkit-scrollbar {
+    display: none;
   }
 
   /* Expand/collapse is no longer this CSS-only grid-rows technique — animating

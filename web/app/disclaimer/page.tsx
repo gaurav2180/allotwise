@@ -14,7 +14,7 @@ export default function DisclaimerPage() {
         <p>
           Allotwise is an independent tool built to read data that registrars, exchanges, and public trackers
           already publish. It is not affiliated with, endorsed by, or connected to KFintech, Link Intime
-          (MUFG Intime), Bigshare, NSE, BSE, SEBI, IPO Watch, or any issuer company named on this site.
+          (MUFG Intime), Bigshare, NSE, BSE, SEBI, InvestorGain, or any issuer company named on this site.
         </p>
       </LegalSection>
 
@@ -58,9 +58,9 @@ export default function DisclaimerPage() {
 
       <LegalSection title="6. Other third-party data">
         <p>
-          Subscription figures come from NSE for mainboard issues and IPO Ji for SME issues. IPO metadata and
-          GMP come from public IPO-tracking pages. These sources can lag the registrar, disagree with each
-          other, or be temporarily unreachable — see{" "}
+          The IPO list, dates, subscription figures and GMP come from one public IPO-tracking site,
+          InvestorGain (investorgain.com). It can lag the registrar or exchanges, or be temporarily
+          unreachable — see{" "}
           <Link href="/terms" className="underline underline-offset-2 hover:no-underline">
             Terms
           </Link>{" "}

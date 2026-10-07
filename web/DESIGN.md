@@ -204,6 +204,20 @@ Asymmetric split hero with a real working demo component on the right, not a
 screenshot. Real GMP table. Feature section with varied composition, not one
 repeated card. Privacy section. Waitlist form.
 
+**Amendment (third pass, "market board"):** distinctiveness comes from
+composition, type scale and real data — never decoration.
+- A quote-board **ticker strip** under the header: every not-yet-listed issue
+  and its live GMP, scrolled by hand (no marquee loop).
+- **Editorial hero type** (42→68px, -0.04em tracking) beside a "Grey market
+  board" that draws each premium as a gain bar against the strongest one.
+- **Ledger** for how it works: the old five-step routine against three gold
+  numerals on a rail — one section instead of steps plus feature cards.
+- **Sourcing as a spec table** (figure / source / how).
+- **Privacy as a journey diagram**: browser (stored) → Allotwise (never
+  stored) → registrar (answers).
+- A large closing statement with the gold phrase, then the waitlist.
+A GMP with no announced price shows no percentage (never a fake 0.00%).
+
 ## Mobile-first (amendment)
 
 The phone is the default target, not the fallback. Concretely:

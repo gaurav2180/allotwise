@@ -17,17 +17,20 @@ export const calendarRowSchema = z.object({
   status: ipoStatusSchema,
   openDate: z.string().nullable(),
   closeDate: z.string().nullable(),
+  allotmentDate: z.string().nullable().default(null),
+  listingDate: z.string().nullable().default(null),
   priceBand: z.string().nullable(),
+  lotSize: z.number().nullable().default(null),
+  issueSize: z.string().nullable().default(null),
   gmp: z.number().nullable(),
   estListingPrice: z.number().nullable(),
   estGainPct: z.number().nullable(),
+  // Overall times subscribed, as the source reports it.
+  subscription: z.number().nullable().default(null),
   source: z.string(),
-  // Which tracker THIS row's premium came from. Usually `source`; different
-  // when the fallback supplied a premium the primary source did not quote.
   gmpSource: z.string().nullable().default(null),
-  // The source states the company's logo alongside the issue, so this is the
-  // one that needs no guessing. Defaulted rather than required: a backend that
-  // predates the field still parses.
+  // The source's own "updated" stamp for the premium, e.g. "2-Oct 11:37".
+  sourceUpdatedAt: z.string().nullable().default(null),
   logo: z.string().nullable().default(null),
   // What the share actually opened at. Present only after listing, and the
   // figure that supersedes the premium once it is.
@@ -38,6 +41,12 @@ export const calendarRowSchema = z.object({
     // from the market slug (`esds-software` vs `esds-software-solution-ipo`).
     ipo: z.string().optional(),
   }),
+  // The issue's registrar and its own allotment-status page, for checking by
+  // hand when the in-app check is not available for this issue.
+  registrar: z
+    .object({ name: z.string().nullable(), url: z.string().nullable() })
+    .nullable()
+    .default(null),
 });
 
 export const calendarSchema = z.object({
@@ -86,11 +95,7 @@ export const ipoListItemSchema = calendarRowSchema.extend({
   // Set when the listing date has arrived, independent of whether the debut
   // price has been published — an issue lists before the outcome is known.
   listedOn: z.string().nullable().default(null),
-  // Which tracker the premium came from — the backend's own `source`, passed
-  // through. A plain string rather than an enum: the set of sources is the
-  // backend's to decide, and a new one should not make the whole list fail to
-  // parse. Every figure on the row comes from this one tracker.
-  gmpSource: z.string().default("ipoji"),
+  gmpSource: z.string().default("investorgain"),
 });
 
 export const ipoListSchema = z.object({
@@ -115,18 +120,9 @@ export const ipoDetailSchema = z.object({
   }),
   details: z.object({
     priceBand: z.string().nullable(),
-    faceValue: z.string().nullable(),
     issueSize: z.string().nullable(),
-    issueType: z.string().nullable(),
     lotSize: z.number().nullable(),
-    minInvestment: z.number().nullable(),
-    // The smallest application the issue allows, straight from its own
-    // application table — one lot on mainboard, two on SME since July 2025.
-    // Nullable: a table exists only once the issue is announced.
-    minApplicationShares: z.number().nullable().default(null),
-    minApplicationLots: z.number().nullable().default(null),
     listingExchanges: z.string().nullable(),
-    nseSymbol: z.string().nullable(),
   }),
   gmp: z.array(
     z.object({
@@ -139,45 +135,26 @@ export const ipoDetailSchema = z.object({
 
 export type IpoDetail = z.infer<typeof ipoDetailSchema>;
 
-/** Day-wise grey market premium for one IPO, oldest first. */
+/** Day-wise grey market premium for one IPO, oldest first, from the source's own table. */
 export const gmpHistorySchema = z.object({
   slug: z.string(),
   name: z.string(),
-  /** The premium shown on the row, for comparison against the series. */
   headline: z.number().nullable(),
-  /** Which tracker the series came from — they disagree, so it is named. */
-  source: z.enum(["ipoji", "allotwise"]),
+  updatedAt: z.string().nullable().default(null),
+  source: z.string(),
   history: z.array(
     z.object({
       date: z.string(),
       gmp: z.number(),
-      change: z.number().nullable(),
       pct: z.number().nullable(),
       indicative: z.number().nullable(),
+      profit: z.number().nullable(),
+      change: z.number().nullable(),
     })
   ),
 });
 
 export type GmpHistory = z.infer<typeof gmpHistorySchema>;
-
-/** A listed IPO and how it actually opened, from /api/listings. */
-export const listingSchema = z.object({
-  name: z.string(),
-  issuePrice: z.number(),
-  gmp: z.number().nullable(),
-  listingPrice: z.number(),
-  gainPct: z.number(),
-  logo: z.string().nullable().default(null),
-});
-
-export const listingsSchema = z.object({
-  count: z.number(),
-  gains: z.number(),
-  losses: z.number(),
-  listings: z.array(listingSchema),
-});
-
-export type Listing = z.infer<typeof listingSchema>;
 
 export type Board = z.infer<typeof boardSchema>;
 export type IpoStatus = z.infer<typeof ipoStatusSchema>;

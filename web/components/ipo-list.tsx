@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 import { FilterTabs, type TabOption } from "@/components/filter-tabs";
 import { Select } from "@/components/ui/select";
 import { IpoRow, IpoListHeader } from "@/components/ipo-row";
@@ -15,14 +14,10 @@ import {
 } from "@/components/states";
 import { usePans } from "@/hooks/use-pans";
 import { useIpoSearch } from "@/hooks/use-ipo-search";
-import { ipoListSchema, apiErrorSchema, type IpoList, type IpoListItem } from "@/lib/schemas";
-import { derivePhase } from "@/lib/utils";
+import { useIpos } from "@/hooks/use-ipos";
+import type { IpoListItem } from "@/lib/schemas";
+import { allotmentOut, derivePhase } from "@/lib/utils";
 
-// No "past" tab. Listing history is still fetched — it supplies the listing
-// price and gain shown on a row that has listed — but it is no longer a
-// destination of its own. `PastList` in components/past-list.tsx renders it and
-// is currently unreferenced; restoring the tab is that import plus an entry in
-// `tabs` below.
 type Filter = "ongoing" | "upcoming" | "allotted";
 type BoardFilter = "all" | "mainboard" | "sme";
 
@@ -35,24 +30,10 @@ type BoardFilter = "all" | "mainboard" | "sme";
  * has not been published: from the applicant's side it is still in flight.
  */
 function bucketOf(ipo: IpoListItem): Filter {
-  if (ipo.allotment.available || ipo.listedOn || ipo.listing) return "allotted";
+  if (ipo.allotment.available || ipo.listedOn || ipo.listing || allotmentOut(ipo)) return "allotted";
   // Dates over scraped status: an issue that opened overnight is no longer
   // upcoming, whatever the last sync recorded.
   return derivePhase(ipo) === "upcoming" ? "upcoming" : "ongoing";
-}
-
-async function fetchIpos(): Promise<IpoList> {
-  const res = await fetch("/api/ipos", { cache: "no-store" });
-  const body = await res.json().catch(() => null);
-
-  if (!res.ok) {
-    const parsed = apiErrorSchema.safeParse(body);
-    throw new Error(parsed.success ? parsed.data.error.message : "The service returned an error.");
-  }
-
-  const parsed = ipoListSchema.safeParse(body);
-  if (!parsed.success) throw new Error("The IPO data was in an unexpected format.");
-  return parsed.data;
 }
 
 /**
@@ -133,26 +114,49 @@ const BOARDS: { value: BoardFilter; label: string }[] = [
   { value: "sme", label: "SME" },
 ];
 
+// Where the reader left the list, kept for the life of the tab so going to the
+// GMP page or PANs and back lands on the same tab, filter and open row. Module
+// scope rather than storage: it resets on a full reload, so the server-rendered
+// defaults and the first client render always agree.
+const remembered: { filter: Filter; board: BoardFilter; openKey: string | null; chosen: boolean } = {
+  filter: "allotted",
+  board: "all",
+  openKey: null,
+  chosen: false,
+};
+
 export function IpoList() {
-  const [filter, setFilter] = useState<Filter>("allotted");
-  const [board, setBoard] = useState<BoardFilter>("all");
+  const [filter, setFilterState] = useState<Filter>(() => remembered.filter);
+  const [board, setBoardState] = useState<BoardFilter>(() => remembered.board);
   // Lifted here rather than kept local to IpoRow, so opening one row can
   // close whichever other one was open — only one detail panel expanded
   // at a time.
-  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [openKey, setOpenKeyState] = useState<string | null>(() => remembered.openKey);
+  const setFilter = (v: Filter) => {
+    remembered.filter = v;
+    setFilterState(v);
+  };
+  const setBoard = (v: BoardFilter) => {
+    remembered.board = v;
+    setBoardState(v);
+  };
+  const setOpenKey = (v: string | null) => {
+    remembered.openKey = v;
+    setOpenKeyState(v);
+  };
   // Only a *switch* — a different row already open — should scroll the newly
   // opened one into view: that's the case where a row collapsing elsewhere
   // shifts the page around and can leave things looking wrong wherever the
   // user's scroll happened to land. Opening the first row from a fully
   // closed list causes no such shift, so it opens exactly where it is.
   const [scrollOnOpen, setScrollOnOpen] = useState(false);
-  const chosen = useRef(false);
+  const chosen = useRef(remembered.chosen);
   const { pans, ready } = usePans();
   const { query: search, setQuery: setSearch } = useIpoSearch();
   const q = search.trim().toLowerCase();
   const isSearching = q.length > 0;
 
-  const query = useQuery({ queryKey: ["ipos"], queryFn: fetchIpos });
+  const query = useIpos();
 
   // Board narrows the set first, so the tab counts reflect what the board
   // filter is actually showing rather than the unfiltered total.
@@ -174,8 +178,12 @@ export function IpoList() {
   useEffect(() => {
     if (chosen.current || !query.data) return;
     chosen.current = true;
+    remembered.chosen = true;
     const first = (["allotted", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
-    if (first && first !== "allotted") setFilter(first);
+    if (first && first !== "allotted") {
+      remembered.filter = first;
+      setFilterState(first);
+    }
   }, [query.data, counts]);
 
   const rows = useMemo(() => {
@@ -299,8 +307,8 @@ export function IpoList() {
               names its source where that actually matters, and the rest was
               implementation detail dressed up as a disclosure. */}
           <p className="mt-6 text-[12px] text-dim">
-            A dash means the issue has not opened yet, not zero demand. Grey market premium is
-            unofficial and is not a quoted price.{" "}
+            GMP and its percentage are shown exactly as InvestorGain quotes them. GMP is unofficial
+            and is not a quoted price.{" "}
             <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
               Disclaimer
             </Link>

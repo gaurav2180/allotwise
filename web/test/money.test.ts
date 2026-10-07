@@ -1,41 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { capPrice, formatIssueSize, formatPriceBand, minApplication } from "@/lib/utils";
+import { capPrice, estProfitPerLot, formatIssueSize, formatPriceBand } from "@/lib/utils";
 
-describe("minApplication", () => {
-  it("uses two lots for an SME issue, because that is its real minimum", () => {
-    // Qualiance: 1,000-share lot, ₹120–127 band, ₹2,54,000 minimum. That is
-    // 2,000 shares — two lots. Reading the lot size alone described half the
-    // investment the row shows beside it.
-    const app = minApplication(1000, 254_000, "₹120 to ₹127 Per Share");
-    expect(app).toEqual({ shares: 2000, lots: 2 });
-
-    // The figure a user actually sees: premium on the whole minimum application.
-    expect(42 * app!.shares).toBe(84_000);
-    // What the old formula gave, on an investment nobody can make.
-    expect(42 * 1000).toBe(42_000);
+describe("estProfitPerLot", () => {
+  it("is lot size times the premium, as InvestorGain and IPOwiz print it", () => {
+    // Nityas Gems: 200-share lot, ₹3 premium → ₹600 on both sites.
+    expect(estProfitPerLot(200, 3)).toBe(600);
+    // TNA Solutions (SME): 2,000-share lot, ₹6 → ₹12,000.
+    expect(estProfitPerLot(2000, 6)).toBe(12_000);
+    expect(estProfitPerLot(468, 0.7)).toBe(327.6);
+    expect(estProfitPerLot(49, -5)).toBe(-245);
   });
 
-  it("uses one lot for mainboard, where that is the minimum", () => {
-    expect(minApplication(8, 14_280, "₹1700 to ₹1785 Per Share")).toEqual({ shares: 8, lots: 1 });
-    expect(minApplication(178, 14_952, "₹79 to ₹84 Per Share")).toEqual({ shares: 178, lots: 1 });
-    expect(minApplication(35, 14_840, "₹403 to ₹424 Per Share")).toEqual({ shares: 35, lots: 1 });
-    expect(minApplication(161, 14_973, "₹88-93")).toEqual({ shares: 161, lots: 1 });
-  });
-
-  it("derives the multiple rather than assuming one or two", () => {
-    expect(minApplication(100, 3 * 100 * 50, "₹45-50")?.lots).toBe(3);
-  });
-
-  it("shows nothing when the figures do not reconcile", () => {
-    // A minimum investment that is not a whole number of lots at the cap price
-    // means the three values are not describing the same issue. A missing row
-    // beats a wrong one when the number is money.
-    expect(minApplication(1000, 999_999, "₹120-127")).toBeNull();
-    expect(minApplication(null, 254_000, "₹120-127")).toBeNull();
-    expect(minApplication(1000, null, "₹120-127")).toBeNull();
-    expect(minApplication(1000, 254_000, null)).toBeNull();
-    expect(minApplication(1000, 254_000, "₹-")).toBeNull();
-    expect(minApplication(0, 254_000, "₹120-127")).toBeNull();
+  it("shows nothing rather than a guess when an input is missing", () => {
+    expect(estProfitPerLot(null, 3)).toBeNull();
+    expect(estProfitPerLot(200, null)).toBeNull();
+    expect(estProfitPerLot(0, 3)).toBeNull();
+    expect(estProfitPerLot(200, 0)).toBe(0);
   });
 
   it("prices at the cap, which is what applications are made at", () => {

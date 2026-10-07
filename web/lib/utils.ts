@@ -47,42 +47,12 @@ export function capPrice(band: string | null | undefined): number | null {
 }
 
 /**
- * Shares in the smallest application a retail investor can actually make, and
- * the premium that would be earned on it.
- *
- * The obvious formula — premium times lot size — is wrong for SME, where the
- * minimum application is **two** lots, not one. Qualiance has a 1,000-share lot
- * and a ₹2,54,000 minimum, which is 2,000 shares: showing "₹42,000" beside
- * "Min investment ₹2,54,000" describes half the investment the cell above it
- * names, and the real figure is ₹84,000. Mainboard is unaffected (its minimum is
- * one lot), which is why this went unnoticed.
- *
- * The multiple is derived from the two published figures rather than assumed, so
- * it stays right if an issue uses some other minimum. Null unless everything
- * needed is present and reconciles — a missing row is better than a wrong
- * number, and this one is about money.
+ * Estimated profit on one lot: lot size times the premium. The same figure
+ * InvestorGain and IPOwiz print as "Est. Profit", so it can be checked against them.
  */
-export function minApplication(
-  lotSize: number | null | undefined,
-  minInvestment: number | null | undefined,
-  priceBand: string | null | undefined
-): { shares: number; lots: number } | null {
-  const cap = capPrice(priceBand);
-  if (!lotSize || lotSize <= 0 || !minInvestment || minInvestment <= 0 || !cap) return null;
-
-  const lots = Math.round(minInvestment / (lotSize * cap));
-  if (lots < 1) return null;
-
-  // The derived multiple has to reproduce the published minimum exactly, give or
-  // take a rupee of rounding. Every issue checked does: 2,000 × ₹127 = ₹2,54,000,
-  // 178 × ₹84 = ₹14,952, 8 × ₹1,785 = ₹14,280. A proportional tolerance is far
-  // too loose here — at 2% a ₹16,000 discrepancy on a ₹10 lakh minimum passes,
-  // and the whole point of this check is that the three figures describe one
-  // issue. If they do not, show nothing.
-  const implied = lots * lotSize * cap;
-  if (Math.abs(implied - minInvestment) > 1) return null;
-
-  return { shares: lots * lotSize, lots };
+export function estProfitPerLot(lotSize: number | null | undefined, gmp: number | null | undefined): number | null {
+  if (!lotSize || lotSize <= 0 || gmp === null || gmp === undefined) return null;
+  return Math.round(lotSize * gmp * 100) / 100;
 }
 
 export function formatPriceBand(band: string | null | undefined): string | null {
@@ -136,6 +106,23 @@ export function formatDate(iso: string | null | undefined): string {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "UTC" });
+}
+
+/** "2026-10-02" -> "2 Oct 2026". */
+export function formatLongDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "—";
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  return `${d.getUTCDate()} ${month} ${d.getUTCFullYear()}`;
+}
+
+/**
+ * Whether the issue's allotment date has arrived. Allotment is out on that day
+ * whether or not Allotwise can query the registrar itself.
+ */
+export function allotmentOut(ipo: { allotmentDate?: string | null }, now = new Date()): boolean {
+  return Boolean(ipo.allotmentDate && ipo.allotmentDate <= now.toISOString().slice(0, 10));
 }
 
 export type Phase = "upcoming" | "open" | "closed";

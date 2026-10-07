@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useState, type CSSProperties, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 
 /**
  * Measured-height expand/collapse — replaces the CSS `grid-template-rows`
@@ -29,9 +29,18 @@ import { useLayoutEffect, useState, type CSSProperties, type RefObject } from "r
  * and passes it in directly as `ref={innerRef}`, the same as any other ref.
  */
 export function useAccordionHeight(open: boolean, innerRef: RefObject<HTMLDivElement | null>) {
-  const [height, setHeight] = useState<number | "auto">(0);
+  // Mount at the resting size for the initial state — closed is 0, open is
+  // `auto` — so nothing has to be measured or animated on first render. A list
+  // of collapsed rows otherwise forced a layout and two re-renders per row
+  // every time it mounted, which is most of what navigating to it cost.
+  const [height, setHeight] = useState<number | "auto">(() => (open ? "auto" : 0));
+  const mounted = useRef(false);
 
   useLayoutEffect(() => {
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
     const node = innerRef.current;
     if (!node) return;
 

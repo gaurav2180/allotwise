@@ -1,275 +1,226 @@
 "use client";
 
-import { useRef, useState } from "react";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { CaretDownIcon, ChartLineUpIcon } from "@phosphor-icons/react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { gmpHistorySchema, type GmpHistory } from "@/lib/schemas";
-import { formatDate, inr } from "@/lib/utils";
-import { useAccordionHeight } from "@/hooks/use-accordion-height";
+import { CaretLeftIcon, InfoIcon } from "@phosphor-icons/react";
+import { IpoLogo } from "@/components/ipo-logo";
+import { GmpChart } from "@/components/gmp-chart";
+import { useIpos } from "@/hooks/use-ipos";
+import { FROM_LIST_KEY, gmpHistoryQuery } from "@/hooks/use-gmp-history";
+import type { IpoListItem } from "@/lib/schemas";
+import { capPrice, derivePhase, estProfitPerLot, formatLongDate, inr } from "@/lib/utils";
 
-async function fetchGmpHistory(slug: string): Promise<GmpHistory> {
-  const res = await fetch(`/api/gmp/${encodeURIComponent(slug)}`, { cache: "no-store" });
-  if (!res.ok) throw new Error("unavailable");
-  const parsed = gmpHistorySchema.safeParse(await res.json());
-  if (!parsed.success) throw new Error("shape");
-  return parsed.data;
+const signColor = (n: number | null | undefined) =>
+  n === null || n === undefined || n === 0 ? undefined : n > 0 ? "var(--positive)" : "var(--negative)";
+
+const pct1 = (n: number | null | undefined) =>
+  n === null || n === undefined || !Number.isFinite(n) ? "—" : `${n.toFixed(1)}%`;
+
+function statusLabel(ipo: IpoListItem): string {
+  if (ipo.listing || ipo.listedOn || ipo.status === "listed") return "Listed";
+  const phase = derivePhase(ipo);
+  return phase === "open" ? "Ongoing" : phase === "upcoming" ? "Upcoming" : "Closed";
 }
 
-type Point = GmpHistory["history"][number];
-
-/**
- * Hover card for a single day. Recharts' default tooltip carries its own
- * light-mode styling, so this one is rebuilt on the token layer to follow the
- * theme, and shows the whole day's record rather than just the value.
- */
-function GmpTooltip({ active, payload }: { active?: boolean; payload?: { payload: Point }[] }) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload;
-
+function OverviewRow({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="rounded-control border border-border bg-surface px-2.5 py-2 shadow-lg">
-      <div className="text-[11px] text-dim">{formatDate(p.date)}</div>
-      <div className="num mt-0.5 text-[14px] font-medium">₹{inr(p.gmp)}</div>
-
-      {(p.change !== null || p.pct !== null) && (
-        <div className="mt-1 flex items-center gap-2 text-[11px]">
-          {p.change !== null && (
-            <span
-              className="num"
-              style={{
-                color:
-                  p.change === 0
-                    ? "var(--dim)"
-                    : p.change > 0
-                      ? "var(--positive)"
-                      : "var(--negative)",
-              }}
-            >
-              {p.change > 0 ? "+" : ""}₹{inr(p.change)}
-            </span>
-          )}
-          {p.pct !== null && <span className="num text-dim">{p.pct > 0 ? "+" : ""}{p.pct}%</span>}
-        </div>
-      )}
-
-      {p.indicative !== null && (
-        <div className="num mt-1 text-[11px] text-dim">Est. listing ₹{inr(p.indicative)}</div>
-      )}
+    <div className="flex items-center justify-between gap-4 border-b border-border py-3.5 last:border-b-0">
+      <span className="text-[14px] text-dim">{label}</span>
+      <span className="num text-[15px] font-medium" style={color ? { color } : undefined}>
+        {value}
+      </span>
     </div>
   );
 }
 
-function GmpChart({ points }: { points: Point[] }) {
-  // A real time axis, not a category one.
-  //
-  // Recharts spaces categories evenly, so a series that skips days — and these
-  // do, whenever a tracker publishes no quote — drew every point the same
-  // distance apart while the date labels jumped by one day here and four there.
-  // The line implied a steady daily march that the dates contradicted. Plotting
-  // against the timestamp makes a gap look like a gap.
-  const data = points.map((p) => ({ ...p, t: Date.parse(`${p.date}T00:00:00Z`) }));
-  const values = points.map((p) => p.gmp);
-  // Direction over the whole window, which is what the shape is read for.
-  const rising = values[values.length - 1] >= values[0];
-  const colour = rising ? "var(--positive)" : "var(--negative)";
-  const gradientId = `gmp-fill-${rising ? "up" : "down"}`;
-
-  // Fitted to the series rather than anchored at zero: a premium that moved
-  // ₹230–₹345 is a flat line against a ₹0 baseline, and the shape of the move
-  // is the entire point of the chart. The pad keeps the line off the edges.
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  const pad = Math.max(2, (hi - lo) * 0.15);
-  const domain: [number, number] = [Math.max(0, Math.floor(lo - pad)), Math.ceil(hi + pad)];
-
-  return (
-    <div className="h-44 w-full">
-      <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-          <defs>
-            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={colour} stopOpacity={0.22} />
-              <stop offset="100%" stopColor={colour} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-
-          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-          <XAxis
-            dataKey="t"
-            type="number"
-            scale="time"
-            // Without an explicit domain a numeric axis pads out to round
-            // numbers, which here are meaningless instants either side of the
-            // series.
-            domain={["dataMin", "dataMax"]}
-            // Ticks on the days that actually have a reading, so every label
-            // corresponds to a point on the line rather than to an interpolated
-            // position between two. minTickGap thins them when they crowd.
-            ticks={data.map((d) => d.t)}
-            tickFormatter={(t: number) => formatDate(new Date(t).toISOString().slice(0, 10))}
-            tick={{ fill: "var(--dim)", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            minTickGap={24}
-          />
-          <YAxis
-            tick={{ fill: "var(--dim)", fontSize: 11 }}
-            axisLine={false}
-            tickLine={false}
-            width={52}
-            domain={domain}
-            tickFormatter={(v: number) => `₹${v}`}
-          />
-          <Tooltip
-            content={<GmpTooltip />}
-            cursor={{ stroke: "var(--dim)", strokeDasharray: "3 3" }}
-          />
-          <Area
-            type="monotone"
-            dataKey="gmp"
-            stroke={colour}
-            strokeWidth={2}
-            fill={`url(#${gradientId})`}
-            // The dot appears on hover only — one per day would crowd a series
-            // that can run for weeks.
-            dot={false}
-            activeDot={{ r: 4, fill: colour, stroke: "var(--surface)", strokeWidth: 2 }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </div>
-  );
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="mt-6 text-[16px] font-semibold">{children}</h2>;
 }
 
-export function GmpHistoryPanel({
-  slug,
-  headlineGmp,
-  headlineSource,
-}: {
-  slug: string;
-  /** The premium shown on the row, so the note compares against what is on
-   *  screen rather than against whatever the backend holds. */
-  headlineGmp: number | null;
-  /** Which tracker the row's premium came from, for the attribution line. */
-  headlineSource: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const accordion = useAccordionHeight(open, contentRef);
-
-  const { data, isPending, isError } = useQuery({
-    queryKey: ["gmp-history", slug],
-    queryFn: () => fetchGmpHistory(slug),
-    // Only fetched once the section is opened, so a collapsed row costs nothing.
-    enabled: open,
-    staleTime: 10 * 60_000,
-  });
-
-  const points = data?.history ?? [];
-  const latest = points.length ? points[points.length - 1].gmp : null;
-  // The row and the chart are the same tracker now, so they should end on the
-  // same number — and this says so only when they somehow do not. It used to
-  // fire on a source *label* mismatch and explain a cross-tracker disagreement
-  // that could not exist, on rows that were mislabelled anyway.
-  //
-  // A real gap here means one of the two is stale (the chart is fetched on
-  // expand, the row on page load), which is worth a word rather than leaving
-  // the reader to wonder which figure to believe.
-  const disagrees = headlineGmp !== null && latest !== null && latest !== headlineGmp;
-
+export function GmpPageSkeleton() {
   return (
-    <div className="mt-4 border-t border-border pt-3">
-      {/* Accent-tinted rather than plain text: this is the one control inside an
-          expanded row, and in `dim` it read as a caption and got missed. The
-          accent keeps it distinct from the figures around it, which are green
-          and red — a control should not be coloured like data. Filled once
-          open, so the pressed state is visible without reading the caret. */}
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="inline-flex h-8 items-center gap-1.5 rounded-pill px-3 text-[12px] font-medium transition-[background-color,color] duration-150 active:scale-[0.97]"
-        style={{
-          background: open ? "var(--accent)" : "var(--accent-soft)",
-          color: open ? "var(--btn-bg)" : "var(--accent)",
-        }}
-      >
-        <ChartLineUpIcon size={14} weight="bold" aria-hidden />
-        Day-wise GMP
-        <CaretDownIcon
-          size={12}
-          weight="bold"
-          aria-hidden
-          className="transition-transform duration-200"
-          style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }}
-        />
-      </button>
-
-      <div style={accordion.outerStyle} inert={accordion.inert}>
-        <div ref={contentRef} style={accordion.innerStyle}>
-          <div className="pt-3">
-            {open && isPending && <div className="aw-skeleton h-44 rounded-card" />}
-
-            {isError && (
-              <p className="text-[12px] text-dim">The premium history is unavailable right now.</p>
-            )}
-
-            {data && points.length === 0 && (
-              <p className="text-[12px] text-dim">
-                No premium has been recorded for this IPO yet.
-              </p>
-            )}
-
-            {data && points.length === 1 && (
-              <p className="text-[12px] text-dim">
-                Only one reading so far —{" "}
-                <span className="num text-text">₹{inr(points[0].gmp)}</span> on{" "}
-                {formatDate(points[0].date)}.
-              </p>
-            )}
-
-            {data && points.length > 1 && (
-              <>
-                <GmpChart points={points} />
-
-                <p className="mt-2 text-[11px] text-dim">
-                  {data.source === "ipoji" ? (
-                    <>
-                      Day-wise history via IPO Ji (ipoji.com). Too few readings of our own to chart
-                      yet, so this comes from a different tracker than the premium above and the two
-                      may not agree.
-                    </>
-                  ) : (
-                    <>
-                      Recorded by Allotwise from the same reading as the premium above, so the line
-                      ends where the row does. History starts from when tracking began rather than
-                      from the issue&rsquo;s announcement.
-                    </>
-                  )}
-                  {disagrees && (
-                    <>
-                      {" "}
-                      The last point is <span className="num">₹{inr(latest as number)}</span> against
-                      the <span className="num">₹{inr(headlineGmp as number)}</span> above — the
-                      chart loaded just now and the row when the page did, so one of them has moved
-                      since.
-                    </>
-                  )}
-                </p>
-              </>
-            )}
-          </div>
+    <div className="mx-auto max-w-2xl" aria-busy="true">
+      <div className="flex items-center gap-2">
+        <div className="size-9" />
+        <div className="aw-skeleton h-5 w-56 rounded-pill" />
+      </div>
+      <div className="mt-4 flex items-center gap-3">
+        <div className="aw-skeleton size-9 rounded-control" />
+        <div className="space-y-1.5">
+          <div className="aw-skeleton h-5 w-48 rounded-pill" />
+          <div className="aw-skeleton h-3.5 w-16 rounded-pill" />
         </div>
       </div>
+      <div className="aw-skeleton mt-7 h-5 w-52 rounded-pill" />
+      <div className="aw-skeleton mt-3 h-44 rounded-card" />
+      <div className="aw-skeleton mt-7 h-5 w-32 rounded-pill" />
+      <div className="aw-skeleton mt-3 h-56 rounded-card" />
+    </div>
+  );
+}
+
+/** One IPO's premium: where it stands now, and how it got there day by day. */
+export function GmpPage() {
+  const slug = useSearchParams().get("ipo") ?? "";
+  const router = useRouter();
+  const ipos = useIpos();
+  const history = useQuery({ ...gmpHistoryQuery(slug), enabled: Boolean(slug) });
+
+  // A real history step when the list sent us here: the browser restores the
+  // list's scroll position, and the list restores its tab and open row.
+  const goBack = (e: React.MouseEvent) => {
+    let fromList = false;
+    try {
+      fromList = sessionStorage.getItem(FROM_LIST_KEY) === slug;
+      sessionStorage.removeItem(FROM_LIST_KEY);
+    } catch {}
+    if (fromList && window.history.length > 1) {
+      e.preventDefault();
+      router.back();
+    }
+  };
+
+  const ipo = ipos.data?.ipos.find((r) => r.slug === slug) ?? null;
+  const name = ipo?.name ?? history.data?.name ?? null;
+  const points = history.data?.history ?? [];
+  const latest = points.length ? points[points.length - 1] : null;
+
+  // The day-wise table is read for this page, so its last point is the newest
+  // reading there is; the list's figure is only as fresh as the last sync. The
+  // headline uses the newer one so it always matches the end of the chart.
+  const gmp = latest?.gmp ?? ipo?.gmp ?? null;
+  const issuePrice = capPrice(ipo?.priceBand);
+  const gmpPct = gmp !== null && issuePrice ? (gmp / issuePrice) * 100 : null;
+  const profit = estProfitPerLot(ipo?.lotSize, gmp);
+  const expected = gmp !== null && issuePrice ? issuePrice + gmp : (latest?.indicative ?? null);
+
+  const loading = Boolean(slug) && (ipos.isPending || history.isPending) && !name;
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <div className="flex items-center gap-2">
+        <Link
+          href="/app"
+          onClick={goBack}
+          aria-label="Back to IPOs"
+          className="-ml-2 grid size-9 shrink-0 place-items-center rounded-control hover:bg-row-hover"
+        >
+          <CaretLeftIcon size={20} weight="bold" />
+        </Link>
+        <h1 className="truncate text-[16px] font-semibold">{name ? `${name} IPO GMP` : "IPO GMP"}</h1>
+      </div>
+
+      {loading && (
+        <div className="mt-5 space-y-3">
+          <div className="aw-skeleton h-12 w-64 rounded-card" />
+          <div className="aw-skeleton h-48 rounded-card" />
+        </div>
+      )}
+
+      {!loading && !name && (
+        <p className="mt-6 text-[13px] text-dim">This IPO is not in the current list.</p>
+      )}
+
+      {name && (
+        <>
+          <div className="mt-4 flex items-center gap-3">
+            <IpoLogo name={name} src={ipo?.logo ?? null} />
+            <div className="min-w-0">
+              <div className="truncate text-[17px] font-semibold">{name} IPO</div>
+              {ipo && <div className="text-[13px] text-dim">{statusLabel(ipo)}</div>}
+            </div>
+          </div>
+
+          <SectionTitle>Current Market Overview</SectionTitle>
+          <div className="mt-1">
+            <OverviewRow
+              label="Current GMP"
+              value={gmp === null ? "—" : gmpPct === null ? `₹${inr(gmp)}` : `₹${inr(gmp)} (${pct1(gmpPct)})`}
+              color={signColor(gmp)}
+            />
+            <OverviewRow
+              label="Est. Profit/Lot"
+              value={profit === null ? "—" : `₹${inr(profit)}`}
+              color={signColor(profit)}
+            />
+            <OverviewRow label="Issue Price" value={issuePrice ? `₹${inr(issuePrice)}` : "—"} />
+            <OverviewRow label="Expected Listing" value={expected !== null ? `₹${inr(expected)}` : "—"} />
+          </div>
+
+          {points.length >= 2 && (
+            <>
+              <div className="mt-6 flex flex-wrap items-baseline justify-between gap-2">
+                <h2 className="text-[16px] font-semibold">GMP Trend</h2>
+                <span className="num text-[12px] text-dim">
+                  ₹{inr(points[0].gmp)} on {formatLongDate(points[0].date)} → ₹{inr(points[points.length - 1].gmp)} now
+                </span>
+              </div>
+              <div className="mt-3 rounded-card border border-border bg-surface px-2 pt-2 pb-1">
+                <GmpChart points={points} showPct={Boolean(issuePrice)} />
+              </div>
+            </>
+          )}
+
+          <SectionTitle>GMP History</SectionTitle>
+          {history.isPending && <div className="aw-skeleton mt-3 h-40 rounded-card" />}
+          {history.isError && (
+            <p className="mt-2 text-[13px] text-dim">The GMP history is unavailable right now.</p>
+          )}
+          {history.data && points.length === 0 && (
+            <p className="mt-2 text-[13px] text-dim">No GMP has been quoted for this IPO yet.</p>
+          )}
+          {points.length > 0 && (
+            <div className="mt-3 overflow-hidden rounded-card border border-border">
+              <table className="w-full text-[14px]">
+                <thead className="bg-surface text-[13px] text-dim">
+                  <tr>
+                    <th className="px-3 py-3 text-left font-normal">Date</th>
+                    <th className="px-3 py-3 text-right font-normal">GMP (₹)</th>
+                    <th className="px-3 py-3 text-right font-normal">GMP %</th>
+                    <th className="px-3 py-3 text-right font-normal">Change</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...points].reverse().map((p) => (
+                    <tr key={p.date} className="border-t border-border">
+                      <td className="px-3 py-3.5">{formatLongDate(p.date)}</td>
+                      <td className="num px-3 py-3.5 text-right" style={{ color: signColor(p.gmp) }}>
+                        ₹{inr(p.gmp)}
+                      </td>
+                      <td className="num px-3 py-3.5 text-right">{issuePrice ? pct1(p.pct) : "—"}</td>
+                      <td
+                        className="num px-3 py-3.5 text-right"
+                        style={{ color: signColor(p.change) ?? "var(--dim)" }}
+                      >
+                        {p.change === null ? "—" : `${p.change > 0 ? "+" : ""}${inr(p.change)}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <SectionTitle>What is GMP?</SectionTitle>
+          <p className="mt-2 text-[14px] leading-relaxed text-dim">
+            Grey Market Premium (GMP) is the premium at which IPO shares trade unofficially before
+            they list on the stock exchange. It reflects demand and gives an expected listing price:
+            issue price plus GMP. Estimated profit per lot is lot size times GMP.
+          </p>
+
+          <div className="mt-5 flex gap-2 border-t border-border pt-4 text-[13px] text-dim">
+            <InfoIcon size={16} className="mt-0.5 shrink-0" aria-hidden />
+            <p>
+              GMP is unofficial and can change rapidly. Always do your own research before investing.
+              Data via InvestorGain{history.data?.updatedAt ? `, updated ${history.data.updatedAt}` : ""}.{" "}
+              <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
+                Disclaimer
+              </Link>
+            </p>
+          </div>
+        </>
+      )}
     </div>
   );
 }

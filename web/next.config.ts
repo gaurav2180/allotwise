@@ -78,11 +78,11 @@ const nextConfig: NextConfig = {
           key: "Content-Security-Policy",
           value: [
             "default-src 'self'",
-            // Next ships inline bootstrap/style attributes; images come from
-            // the two logo hosts the IPO list resolves against.
+            // Next ships inline bootstrap/style attributes; company logos come
+            // from the market source's image host.
             "script-src 'self' 'unsafe-inline'",
             "style-src 'self' 'unsafe-inline'",
-            "img-src 'self' data: https://media.ipoji.com https://ipowatch.in",
+            "img-src 'self' data: https://www.chittorgarh.net",
             "font-src 'self' data:",
             // Same-origin only: the browser never calls the Express backend
             // directly, every upstream goes through this app's own routes.

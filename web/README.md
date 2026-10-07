@@ -58,67 +58,14 @@ than burning the window — remaining PANs are marked skipped.
 
 ## Keeping data current
 
-Two independent schedules, because the frontend reads some sources the backend
-does not.
+All market data — the IPO list, dates, lot, issue size, subscription, GMP and
+the day-wise GMP history — reaches this app only through the backend, which
+reads one source (InvestorGain). The app's API routes are pass-throughs; there
+is no frontend scraping and no background warmer.
 
-**Backend** (`npm run scheduler`, run from the repo root) — registrar mappings,
-GMP, metadata, and links, on the intervals documented in the main README. This
-must be running for the product data (allotment mappings, GMP) to move at all;
-without it, `/calendar` and `/allotment` serve whatever was last synced.
-
-**Frontend** (`instrumentation.ts` → `lib/background-refresh.ts`) — sources this
-app reads directly rather than through the backend:
-
-| Source | Interval | Why |
-| --- | --- | --- |
-| NSE subscription (mainboard) | 3 min | The one figure that moves while a market session runs |
-| IPO Ji subscription (SME) | 3 min | Same reason; NSE's own SME figure is unusable (see below) |
-| NSE symbol index (~1400 companies) | 3 h | Large, slow-changing; a request should never pay its cold-fetch cost |
-| IPO Ji slug index (~250 companies) | 3 h | Same shape as the NSE symbol index, for the same reason |
-| IPO Watch logos | 3 h | Company logos do not change hour to hour |
-| Listing outcomes (Past tab) | 3 h | New rows appear once a day at most |
-
-Starts once per server process — `instrumentation.ts` is Next's own
-startup hook, not a request handler, and a `globalThis` guard stops dev-mode
-Fast Refresh from starting a second set of intervals. Restarting `next dev`
-restarts the warmer; it does not persist across restarts on its own.
-
-The request path (`/api/ipos`) still resolves anything the warmer has not
-gotten to yet, budgeted so a cold cache never stalls a page load — the warmer
-just means that budget is rarely spent, because the answer is already sitting
-in cache by the time someone asks.
-
-**SME subscription — a separate source, not a workaround.** NSE reports zero
-shares *offered* for SME issues even when shares *bid* is real and large
-(confirmed against actual bid volumes — an NSE data-quality gap, not a parsing
-bug here), so its own ratio is unusable there. Mainboard is unaffected and
-stays on NSE, which is trustworthy for it.
-
-An earlier attempt reconstructed the missing denominator from the issue size
-and price band already scraped from IPO Watch (`issueSize ÷ cap price`). It
-looked right — reproducing NSE's own 42.6x exactly on a mainboard issue used
-as a sanity check — but was wrong for SME specifically: issue size includes
-anchor-investor and market-maker carve-outs that are not part of the public
-offer NSE's ratio is measured against, so the reconstructed multiple came out
-low (Ashutosh Fibre: 56x reconstructed vs. 133.82x actual).
-
-**Current source**: `lib/ipoji-subscription.ts` reads the multiple directly
-from IPO Ji (`ipoji.com`), which publishes it per-category (QIB/NII/Retail/
-Total) on each issue's own page — no reconstruction, no denominator. IPO Ji's
-slug is not derivable from the company name ("Complete Sports Management
-India" is `complete-sports-and-management-ipo`), so it is resolved the same
-way logos are (`lib/logos.ts`): real `/ipo/<slug>` links are pulled from IPO
-Ji's own listing pages and fuzzy-matched by name, rather than guessed. Wired
-into `app/api/ipos/route.ts` for SME issues only, running alongside (not
-instead of) the NSE fetch used for mainboard.
-
-A dash still means the issue has not opened yet, or IPO Ji has not indexed it
-under a resolvable name — not zero demand.
-- **Historical logos are partial.** IPO Watch's logo pool (current + two
-  listed-history pages, merged) does not cover the full 300-issue Past tab —
-  there is no comprehensive public logo archive to pull from. Coverage skews
-  toward recently-listed issues; older ones fall back to the monogram tile,
-  which is a designed state, not a broken image.
+**Backend** (`npm run scheduler`, run from the repo root) must be running for
+the data to move at all; without it, `/calendar` and `/allotment` serve
+whatever was last synced.
 
 ## Notes
 
