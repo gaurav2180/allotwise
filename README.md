@@ -31,16 +31,13 @@ curl -X POST http://localhost:3000/allotment \
 | `GET /ipo/<slug>` | **Unified IPO view**: timeline, details, GMP, subscription, allotment link |
 | `GET /calendar[?status=&board=]` | IPO calendar: dates + status (with GMP) |
 | `GET /gmp[?board=&status=]` | Live grey-market premium list |
-| `GET /gmp?ipo=<slug>` | One IPO's GMP across sources, with history |
-| `GET /subscription?ipo=<slug>` | Live subscription (× subscribed) by category |
+| `GET /gmp?ipo=<slug>` | One IPO's GMP with its day-wise history |
 | `GET /ipos[?registrar=kfintech]` | Registrar-mapped IPOs and their slugs |
 | `GET /health` | DB, cache, and rate-limiter state |
 
-`GET /ipo/<slug>` is the one call a product IPO-detail page needs: it returns
-the full timeline (open/close/allotment/refund/listing), details (price band,
-face value, issue size/type, lot size, min investment, listing exchanges, NSE
-symbol), GMP across sources, live subscription by category, and whether
-allotment can be checked here.
+`GET /ipo/<slug>` returns the timeline (open/close/allotment/listing), details
+(price band, issue size, lot size, exchanges), GMP, overall subscription, and
+whether allotment can be checked here.
 
 `status` is `upcoming\|open\|closed\|listed`; `board` is `mainboard\|sme`.
 
@@ -188,113 +185,39 @@ registrars (Cameo, Skyline, Maashitla, Purva) can be added the same way: an
 `api` module if their data call is open, otherwise a `deeplink` entry plus a
 seeding parser.
 
-## GMP + calendar
+## Market data: one source
 
-The tracker side (`/calendar`, `/gmp`) is fed by `market_ipos`, populated by
-`npm run sync:gmp` from GMP source adapters in `src/gmp/`. Each adapter exposes
-`{ meta, fetchGmp }` and is isolated: a parse failure in one source is reported
-per-source and never sinks the others (`fetchAll` uses `Promise.allSettled`).
+Everything on the IPO screen except allotment comes from **InvestorGain**
+(investorgain.com), adapter `src/gmp/investorgain.js`. It is the feed IPOwiz
+uses: its day-wise table for Nityas Gems (₹9, ₹5, ₹5, ₹3, ₹3; est. listing ₹78;
+est. profit ₹600) is IPOwiz's screen number for number, and its live premiums
+matched IPOwiz where IPO Ji and IPO Watch each disagreed.
 
-**Two jobs, two settings.** Sourcing is split because the source with the best
-facts is not the source with the best grey-market coverage.
-
-| | setting | job |
+| page | what it supplies | written by |
 | --- | --- | --- |
-| Calendar | `GMP_CALENDAR_SOURCE` (default `ipoji`) | which IPOs exist, and every published fact: dates, price band, lot size, issue size, minimum application, listing price, logo, board |
-| Premium | `GMP_SOURCES` (default `ipowatch,ipoji`) | the grey market premium, tried left to right |
+| live table `/report/live-ipo-gmp/331/` | which IPOs exist, board, status, GMP, price, lot, issue size, subscription, open/close/allotment/listing dates, debut price | `npm run sync:gmp` |
+| issue page `/gmp/<slug>/<id>/` | full price band, exchanges, logo | `npm run sync:meta` |
+| issue page, day-wise table | GMP history (served live by `/gmp?ipo=`, cached 15 min) | on request |
 
-**Exactly one calendar source, enforced at boot.** Two sources name the same
-company differently — IPO Watch calls one issue **"NSE"**, IPO Ji calls it
-**"National Stock Exchange of India"** — and those share no slug and no name
-token, so `mergeBySlug` sees two IPOs and the fuzzy matcher scores the pair at
-**zero**. The issue then appears twice and nothing downstream can fix it. The
-process refuses to start if `GMP_CALENDAR_SOURCE` contains a comma.
+One source means nothing on a row can contradict anything else on it. Earlier
+versions mixed a calendar source, a premium chain and three web-side scrapers,
+and the screen showed their disagreements. The source is fixed in code; rows
+from any other `source` are deleted at startup.
 
-**Any number of premium sources, safely.** `resolveGmp` only ever fills a value
-onto a row the calendar has already created — it cannot add, rename or remove an
-IPO — so the chain's length is free. A link that is down, or that does not carry
-an issue, falls through to the next.
+**Est. profit** is lot size × GMP, the same definition InvestorGain and IPOwiz
+print. Percentage and expected listing are computed against the cap price.
 
-**The same chain for every board.** This is the point of the split. Sourcing
-used to treat the calendar's own premium as authoritative and let a second
-tracker fill gaps, which in practice made the *board* pick the tracker: IPO Ji
-quotes almost no SME, so SME rows came from IPO Watch and mainboard rows from
-IPO Ji, and two rows in one list could not be compared. `resolveGmp` now clears
-the calendar's premium and re-resolves every row through one chain.
+**Parsing notes.** Cells are read by `data-label`/`data-title`, never by index.
+Dates print without a year (`30-Sep`); `dayMonth` takes the year nearest the
+reading. The debut price (`L@455.00`) is Cloudflare address-obfuscated and is
+decoded from `data-cfemail`. `--` means not quoted yet (null), not zero.
 
-IPO Watch leads it on measurement, not preference — counted on one live board:
+**GMP is unofficial** — not published by SEBI or the exchanges. Every response
+carries an `attribution` array; surface it.
 
-| board | rows | IPO Ji quoted | IPO Watch quoted |
-| --- | --- | --- | --- |
-| mainboard | 25 | 11 | 11 |
-| SME | 15 | **2** | **15** |
-
-**Only the premium is borrowed.** The percentage and the indicative listing price
-are recomputed from *our* price band, because the trackers disagree on value
-(Spectraa: ₹45 against ₹67) and pairing one's premium with another's arithmetic
-would print a number nobody published. Each row records which tracker answered
-(`gmp_source`), so a mixed list stays honest row by row.
-
-**GMP has no authoritative source.** It is not published by SEBI or the
-exchanges — every site polls its own dealers, which is why the figures differ.
-Rows are stamped with their source and the response carries an `attribution`
-array; surface it.
-
-Rows whose `source` is no longer the calendar source are deleted at startup.
-Dropping a source otherwise leaves its rows in `market_ipos`, still appearing in
-the list — the duplicate outliving the decision to stop making it.
-
-Adding a source is one entry in the `SOURCES` registry in `src/gmp/index.js`
-plus an adapter exposing `{ meta, fetchGmp }`. Two candidates were rejected on
-inspection: InvestorGain serves its table from Next.js payload chunks, and IPO
-Bazar renders GMP client-side, so neither is readable from the HTML.
-
-**GMP is unofficial** grey-market data. Every record is stamped with `source`
-and the site's own "last updated" text, and every response carries an
-`attribution` array — surface it in the UI.
-
-**Scraping posture.** `robots.txt` allows `/` and the content-signal permits
-reference use, but the sites sit behind Cloudflare, which serves empty bodies to
-non-browser user agents — so the fetcher presents a browser UA (configurable via
-`GMP_USER_AGENT`). Good-citizen behaviour is kept where it matters: sync
-infrequently (30–60 min; GMP does not move faster), cache, retry on Cloudflare's
-intermittent empty responses, and attribute. Do **not** run the sync in a tight
-loop — repeated rapid fetches are what trip the bot filter.
-
-**Dates.** IPO Watch prints compact ranges like `28-1 Sept` (open 28th of the
-previous month, close 1 Sept — the month label is the close date's). `parseDateRange`
-in `src/lib/marketDates.js` resolves these to ISO dates, inferring the year.
-
-**GMP history.** `gmp_history` gets an append-only row whenever a value changes,
-so the product can chart an IPO's grey-market trend over its run.
-
-## Metadata, timeline, and subscription
-
-`npm run sync:meta` and `npm run sync:subscription` fill the rest of an IPO card:
-
-- **NSE** (`src/market/nse.js`) — official JSON, the source for **subscription**
-  (`ipo-active-category?symbol=`, QIB/NII/Retail/Total × subscribed) and the
-  trading symbol. NSE gates `/api` behind a session cookie, so the adapter primes
-  a cookie jar from the homepage and reuses it. **Mainboard only** — SME issues
-  are on NSE Emerge / BSE SME and are not wired yet. Its issue size is a *share
-  count* and is deliberately not stored: a count is not what issues are compared
-  by, and multiplying it out does not reproduce the published rupee amount
-  (anchor and market-maker carve-outs sit outside it).
-- **IPO Ji detail pages** — issue size as published (`₹45.11 Cr`, or
-  `₹92.5 Cr Fresh + 76.74 Lakh OFS` when split), lot size, min investment,
-  listing exchanges, allotment and listing dates. Read from the page's
-  `fact-item` list, with its milestone timeline as a second reading of the dates.
-- **IPO Watch detail pages** — the same fields plus face value, issue type and
-  the refund date, used only when IPO Ji does not carry the issue.
-
-Detail pages are fetched only for `upcoming`/`open` IPOs, one row per slug,
-bounded by `GMP_DETAIL_FETCH_LIMIT`, with a delay between pages.
-
-NSE records are matched to existing market IPOs with the same fuzzy matcher used
-for registrar links. Subscription is stored as the latest snapshot per
-`(slug, category)` and replaced wholesale each sync so a vanished category never
-lingers. A partly-detailed upcoming IPO (source page still says "TBA") yields
-partial fields rather than an error.
+**Scraping posture.** The site sits behind Cloudflare, which serves empty bodies
+to non-browser user agents, so the fetcher presents a browser UA
+(`GMP_USER_AGENT`). Sync infrequently (30–60 min), retry, and attribute.
 
 ## Scheduler
 
@@ -302,13 +225,13 @@ partial fields rather than an error.
 recommended production setup. Each job runs its sync **script in a child
 process**, so a crash never touches the web server and the DB is written by a
 short-lived process. Jobs are overlap-guarded (a slow run skips its next tick).
-Defaults: registrar+GMP+metadata+link chain hourly, GMP every 30 min,
-subscription every 20 min (tune via `SCHEDULER_*`). Alternatively set
+Defaults: registrar+GMP+metadata+link chain hourly, GMP every 30 min (tune via
+`SCHEDULER_*`). Alternatively set
 `SCHEDULER_ENABLED=true` to run it inside `npm start`.
 
 This closes the loop your question raised: once scheduled, a newly-opened IPO
 appears in `/calendar` and `/ipo/<slug>` on the next cycle — with dates,
-details, GMP, and (mainboard) subscription — with no manual step.
+details, GMP and subscription — with no manual step.
 
 ## Canonical IPO identity (registrar ↔ GMP)
 

@@ -28,7 +28,20 @@ const MARKET_EXTRA_COLUMNS = {
   min_application_shares: 'INTEGER',
   min_application_lots: 'INTEGER',
   details_updated_at: 'TEXT',
+  // The issue's page on the source, where its band and day-wise history live.
+  source_path: 'TEXT',
+  // Overall times subscribed, as the source reports it for every board.
+  subscription: 'REAL',
+  // The issue page's day-wise GMP table, as JSON, and when it was read.
+  daywise_json: 'TEXT',
+  daywise_at: 'TEXT',
+  // The issue's registrar and its own allotment-status page, as published.
+  registrar_name: 'TEXT',
+  registrar_url: 'TEXT',
 };
+
+// The one source rows come from. See src/gmp/index.js.
+const MARKET_SOURCE = 'investorgain';
 
 function ensureMarketColumns(d) {
   const existing = new Set(d.prepare('PRAGMA table_info(market_ipos)').all().map((c) => c.name));
@@ -37,20 +50,26 @@ function ensureMarketColumns(d) {
   }
 }
 
-// Rows from a source that no longer supplies the calendar. Switching the
-// calendar source stops new rows arriving but leaves the old ones in the table,
-// and they keep showing up in the list -- the duplicate outliving the decision
-// to stop making it. Nothing here is anyone's data: every row is rebuilt from
-// the live source on the next sync, so removing a stale one costs minutes of
-// staleness at worst.
-//
-// Keyed on the calendar source alone, not the premium chain: a tracker that
-// only fills values never owns a row, so its presence in GMP_SOURCES must not
-// keep dead rows alive.
+// Rows from a source that has been retired. They would otherwise sit in the
+// list beside the live source's rows for the same issue, named differently.
+// Nothing here is anyone's data: every row is rebuilt from the live source on
+// the next sync.
 function dropUnconfiguredSources(d) {
-  const keep = config.gmp.calendarSource;
-  if (!keep) return; // Misconfiguration; emptying the table is worse.
-  d.prepare('DELETE FROM market_ipos WHERE source != ?').run(keep);
+  d.prepare('DELETE FROM market_ipos WHERE source != ?').run(MARKET_SOURCE);
+  d.prepare('DELETE FROM gmp_history WHERE source != ?').run(MARKET_SOURCE);
+}
+
+const capOf = (band) => {
+  const nums = [...String(band ?? '').replace(/,/g, '').matchAll(/\d+(?:\.\d+)?/g)].map(Number).filter((n) => n > 0);
+  return nums.length ? Math.max(...nums) : null;
+};
+
+// The live table states only the cap ("₹75"); the issue page states the band
+// ("₹70 to ₹75"). They describe one price as long as the caps agree, so the
+// fuller one is kept rather than overwritten every half hour.
+function keepFullerBand(existing, incoming) {
+  if (!existing || !incoming) return incoming ?? existing ?? null;
+  return capOf(existing) === capOf(incoming) && existing.length > incoming.length ? existing : incoming;
 }
 
 // Issue size must be the rupee amount a source published, never a share count.
@@ -164,10 +183,11 @@ export function markFinalized(slug, finalized = true) {
 export function upsertMarketIpo(rec) {
   const d = getDb();
   const existing = d
-    .prepare('SELECT id, gmp FROM market_ipos WHERE source = ? AND slug = ?')
+    .prepare('SELECT id, gmp, price_band FROM market_ipos WHERE source = ? AND slug = ?')
     .get(rec.source, rec.slug);
 
   if (existing) {
+    rec = { ...rec, priceBand: keepFullerBand(existing.price_band, rec.priceBand) };
     d.prepare(
       `UPDATE market_ipos SET
          name = ?, board = ?, gmp = ?, gmp_trend = ?, price_band = ?,
@@ -265,9 +285,11 @@ const marketRowToApi = (r) => ({
   listingDate: r.listing_date ?? null,
   logo: r.logo_url ?? null,
   listingPrice: r.listing_price ?? null,
-  // Which tracker THIS row's premium came from. Usually the row's own source;
-  // different when the fallback supplied a premium the primary did not quote.
   gmpSource: r.gmp_source ?? r.source,
+  sourcePath: r.source_path ?? null,
+  subscription: r.subscription ?? null,
+  registrarName: r.registrar_name ?? null,
+  registrarUrl: r.registrar_url ?? null,
 });
 
 // Patch metadata/detail fields on the primary market row for a slug. Only the
@@ -288,6 +310,11 @@ const META_COLUMNS = {
   listingDate: 'listing_date',
   logo: 'logo_url',
   listingPrice: 'listing_price',
+  sourcePath: 'source_path',
+  subscription: 'subscription',
+  priceBand: 'price_band',
+  registrarName: 'registrar_name',
+  registrarUrl: 'registrar_url',
 };
 
 export function updateMarketMeta(slug, fields) {
@@ -304,39 +331,6 @@ export function updateMarketMeta(slug, fields) {
   args.push(slug);
   // Apply to every source row for this slug so the merged view is consistent.
   return getDb().prepare(`UPDATE market_ipos SET ${sets.join(', ')} WHERE slug = ?`).run(...args).changes;
-}
-
-export function upsertSubscription(rec) {
-  return getDb()
-    .prepare(
-      `INSERT INTO subscriptions (slug, category, shares_offered, shares_bid, times_subscribed, source, source_updated_at, last_seen_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-       ON CONFLICT (slug, category) DO UPDATE SET
-         shares_offered = excluded.shares_offered,
-         shares_bid = excluded.shares_bid,
-         times_subscribed = excluded.times_subscribed,
-         source = excluded.source,
-         source_updated_at = excluded.source_updated_at,
-         last_seen_at = datetime('now')`
-    )
-    .run(
-      rec.slug, rec.category, rec.sharesOffered ?? null, rec.sharesBid ?? null,
-      rec.timesSubscribed ?? null, rec.source, rec.sourceUpdatedAt ?? null
-    );
-}
-
-export function clearSubscription(slug) {
-  return getDb().prepare('DELETE FROM subscriptions WHERE slug = ?').run(slug).changes;
-}
-
-export function getSubscription(slug) {
-  return getDb()
-    .prepare(
-      `SELECT category, shares_offered AS sharesOffered, shares_bid AS sharesBid,
-              times_subscribed AS timesSubscribed, source, source_updated_at AS sourceUpdatedAt
-         FROM subscriptions WHERE slug = ? ORDER BY id`
-    )
-    .all(slug);
 }
 
 export function listMarketIpos({ status, board, source } = {}) {
@@ -356,6 +350,30 @@ export function getMarketIpoBySlug(slug) {
     .prepare('SELECT * FROM market_ipos WHERE slug = ? ORDER BY last_seen_at DESC')
     .all(slug)
     .map(marketRowToApi);
+}
+
+/** Store an issue's day-wise GMP table, as read from its page. */
+export function saveDaywise(slug, points) {
+  return getDb()
+    .prepare(`UPDATE market_ipos SET daywise_json = ?, daywise_at = datetime('now') WHERE slug = ?`)
+    .run(JSON.stringify(points ?? []), slug).changes;
+}
+
+/** The stored day-wise table and its age in seconds, or null if never read. */
+export function getDaywise(slug) {
+  const row = getDb()
+    .prepare(
+      `SELECT daywise_json, CAST(strftime('%s','now') - strftime('%s', daywise_at) AS INTEGER) AS age
+         FROM market_ipos WHERE slug = ? AND daywise_json IS NOT NULL
+        ORDER BY last_seen_at DESC LIMIT 1`
+    )
+    .get(slug);
+  if (!row) return null;
+  try {
+    return { points: JSON.parse(row.daywise_json), ageSeconds: row.age ?? Infinity };
+  } catch {
+    return null;
+  }
 }
 
 export function getGmpHistory(slug, { source, limit = 100 } = {}) {

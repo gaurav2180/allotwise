@@ -16,8 +16,13 @@ import { logger } from '../src/lib/logger.js';
 
 const NEEDLE = "JSON.parse('";
 
+// KFintech's host answers a request without a browser User-Agent with its
+// index.html for every path, so the bundle fetch came back as HTML and the
+// sync found no IPOs at all — which left every KFintech issue uncheckable.
+const HEADERS = { 'User-Agent': config.gmp.userAgent, Accept: '*/*' };
+
 async function resolveBundleUrl() {
-  const res = await fetch(config.kfintech.bundleIndex, { redirect: 'follow' });
+  const res = await fetch(config.kfintech.bundleIndex, { redirect: 'follow', headers: HEADERS });
   if (!res.ok) throw new Error(`index fetch failed: HTTP ${res.status}`);
   const html = await res.text();
   const m = html.match(/src="\.?\/?(static\/js\/main\.[a-f0-9]+\.js)"/i);
@@ -51,7 +56,7 @@ async function main() {
     bundleUrl = await resolveBundleUrl();
     logger.info('resolved bundle', { bundleUrl });
 
-    const res = await fetch(bundleUrl);
+    const res = await fetch(bundleUrl, { headers: HEADERS });
     if (!res.ok) throw new Error(`bundle fetch failed: HTTP ${res.status}`);
     const entries = extractClients(await res.text());
 

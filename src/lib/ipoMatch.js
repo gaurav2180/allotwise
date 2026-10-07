@@ -10,6 +10,21 @@ const STOP = new Set([
   'company', 'corporation', 'corp', 'inc', 'llp',
 ]);
 
+// Words so common in Indian company names that sharing them says nothing about
+// identity. "Acme India Industries" and "Adroit Industries India" share two of
+// these and nothing else; that scored exactly the link threshold, which is how
+// one company's allotment check could be pointed at another's registrar entry.
+const GENERIC = new Set([
+  'india', 'indian', 'industry', 'technology', 'solution', 'service', 'enterprise',
+  'infra', 'infrastructure', 'global', 'international', 'group', 'holding',
+  'venture', 'system', 'product', 'engineering', 'project', 'finance', 'financial',
+]);
+
+// Singular and plural are the same company: the registrar files "Runwal
+// Enterprise Limited" where the market lists "Runwal Enterprises".
+const singular = (t) =>
+  t.length > 5 && t.endsWith('ies') ? `${t.slice(0, -3)}y` : t.length > 4 && t.endsWith('s') && !t.endsWith('ss') ? t.slice(0, -1) : t;
+
 export function nameTokens(name) {
   return [
     ...new Set(
@@ -20,6 +35,7 @@ export function nameTokens(name) {
         .replace(/[^a-z0-9]+/g, ' ')
         .split(' ')
         .filter((t) => t && !STOP.has(t))
+        .map(singular)
     ),
   ];
 }
@@ -36,6 +52,8 @@ export function matchScore(a, b) {
   const setB = new Set(tb);
   const shared = ta.filter((t) => setB.has(t));
   if (shared.length === 0) return 0;
+  // At least one shared word has to actually identify the company.
+  if (shared.every((t) => GENERIC.has(t))) return 0;
 
   // A single shared token only counts if it is distinctive (length >= 4), so
   // "Annu Projects" and "Skyline Projects" do not collapse onto each other.

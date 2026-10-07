@@ -17,7 +17,7 @@ import { parseCompanies } from '../src/registrars/bigshare.js';
 async function main() {
   const url = config.bigshare.statusPage;
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { headers: { 'User-Agent': config.gmp.userAgent } });
     if (!res.ok) throw new Error(`status page fetch failed: HTTP ${res.status}`);
     const companies = parseCompanies(await res.text());
 

@@ -14,11 +14,11 @@
     "sync:kfintech": "node --no-warnings=ExperimentalWarning scripts/sync-kfintech.js",
     "sync:linkintime": "node --no-warnings=ExperimentalWarning scripts/sync-linkintime.js",
     "sync:bigshare": "node --no-warnings=ExperimentalWarning scripts/sync-bigshare.js",
+    "sync:maashitla": "node --no-warnings=ExperimentalWarning scripts/sync-maashitla.js",
     "sync:gmp": "node --no-warnings=ExperimentalWarning scripts/sync-gmp.js",
     "sync:meta": "node --no-warnings=ExperimentalWarning scripts/sync-metadata.js",
-    "sync:subscription": "node --no-warnings=ExperimentalWarning scripts/sync-subscription.js",
     "link:ipos": "node --no-warnings=ExperimentalWarning scripts/link-ipos.js",
-    "sync": "npm run sync:kfintech && npm run sync:linkintime && npm run sync:bigshare && npm run sync:gmp && npm run sync:meta && npm run sync:subscription && npm run link:ipos",
+    "sync": "npm run sync:kfintech && npm run sync:linkintime && npm run sync:bigshare && npm run sync:maashitla && npm run sync:gmp && npm run sync:meta && npm run link:ipos",
     "scheduler": "node --no-warnings=ExperimentalWarning scripts/scheduler.js",
     "test": "node --no-warnings=ExperimentalWarning --test test/smoke.mjs"
   },

@@ -68,7 +68,7 @@ function runChain(name, files) {
 }
 
 export function startScheduler() {
-  const { registrarsMs, gmpMetaMs, subscriptionMs, runOnStart } = config.scheduler;
+  const { registrarsMs, gmpMetaMs, runOnStart } = config.scheduler;
 
   const jobs = [
     {
@@ -80,12 +80,12 @@ export function startScheduler() {
           'sync-kfintech.js',
           'sync-linkintime.js',
           'sync-bigshare.js',
+          'sync-maashitla.js',
           'sync-gmp.js',
           'sync-metadata.js',
           'link-ipos.js',
         ]),
     },
-    { name: 'subscription', every: subscriptionMs, run: () => runScript('subscription', 'sync-subscription.js') },
     // GMP alone, more often than the full chain, so premiums stay fresh.
     { name: 'gmp', every: gmpMetaMs, run: () => runScript('gmp', 'sync-gmp.js') },
   ];
@@ -100,7 +100,6 @@ export function startScheduler() {
   logger.info('scheduler started', {
     registrarsMin: Math.round(registrarsMs / 60000),
     gmpMin: Math.round(gmpMetaMs / 60000),
-    subscriptionMin: Math.round(subscriptionMs / 60000),
     runOnStart,
   });
 

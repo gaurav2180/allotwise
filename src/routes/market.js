@@ -1,12 +1,7 @@
 import { Router } from 'express';
-import {
-  listMarketIpos,
-  getMarketIpoBySlug,
-  getGmpHistory,
-  registrarSlugForMarket,
-  getSubscription,
-} from '../db/index.js';
-import { availableSources, mergeBySlug } from '../gmp/index.js';
+import { listMarketIpos, getMarketIpoBySlug, registrarSlugForMarket, getDaywise, saveDaywise } from '../db/index.js';
+import { availableSources, mergeBySlug, source } from '../gmp/index.js';
+import { logger } from '../lib/logger.js';
 import { parseSlug } from '../lib/validate.js';
 import { badRequest, notFound } from '../lib/errors.js';
 
@@ -33,19 +28,16 @@ function parseFilters(query) {
   return filters;
 }
 
-// IPO calendar: dates + status, GMP included for convenience.
+// IPO calendar: every current issue with its premium and published facts.
 marketRouter.get('/calendar', (req, res, next) => {
   try {
     const filters = parseFilters(req.query);
-    // An explicit ?source= is a request for that source's own rows, so it is
-    // the one case where collapsing them would be wrong.
     const rows = listMarketIpos(filters);
     const ipos = filters.source ? rows : mergeBySlug(rows);
     res.json({
       count: ipos.length,
       filters,
       ipos: ipos.map((i) => {
-        // Reverse link: can the user check allotment for this IPO here?
         const link = registrarSlugForMarket(i.slug);
         return {
           slug: i.slug,
@@ -54,17 +46,23 @@ marketRouter.get('/calendar', (req, res, next) => {
           status: i.status,
           openDate: i.openDate,
           closeDate: i.closeDate,
+          allotmentDate: i.allotmentDate,
+          listingDate: i.listingDate,
           priceBand: i.priceBand,
+          lotSize: i.lotSize,
+          issueSize: i.issueSize,
           gmp: i.gmp,
           estListingPrice: i.estListingPrice,
           estGainPct: i.estGainPct,
+          subscription: i.subscription,
           source: i.source,
-          // Which tracker this row's premium came from — the row's own source
-          // unless the fallback supplied one the primary did not quote.
           gmpSource: i.gmpSource,
+          sourceUpdatedAt: i.sourceUpdatedAt,
           logo: i.logo,
           listingPrice: i.listingPrice,
           allotment: link ? { available: true, ipo: link.registrar_slug } : { available: false },
+          // Where to check by hand when the in-app check is not available.
+          registrar: i.registrarName || i.registrarUrl ? { name: i.registrarName, url: i.registrarUrl } : null,
         };
       }),
       attribution,
@@ -74,8 +72,43 @@ marketRouter.get('/calendar', (req, res, next) => {
   }
 });
 
-// GMP list, or a single IPO's GMP (with history) when ?ipo=<slug> is given.
-marketRouter.get('/gmp', (req, res, next) => {
+const DAYWISE_FRESH_S = 15 * 60;
+const refreshing = new Set();
+
+async function refreshDaywise(row) {
+  if (refreshing.has(row.slug)) return null;
+  refreshing.add(row.slug);
+  try {
+    const { history } = await source.fetchIssue(row.sourcePath);
+    saveDaywise(row.slug, history);
+    return history;
+  } catch (err) {
+    logger.warn('daywise fetch failed', { slug: row.slug, message: err.message });
+    return null;
+  } finally {
+    refreshing.delete(row.slug);
+  }
+}
+
+/**
+ * The source's own day-wise table for one issue — the same feed the headline
+ * premium comes from. Served from the database, which the metadata sync fills
+ * while it already has the page open, so the GMP page never waits on the
+ * source. A copy older than 15 minutes is refreshed in the background; only an
+ * issue never read before is fetched while the caller waits.
+ */
+async function daywise(row) {
+  if (!row.sourcePath) return [];
+  const stored = getDaywise(row.slug);
+  if (stored) {
+    if (stored.ageSeconds > DAYWISE_FRESH_S) refreshDaywise(row);
+    return stored.points;
+  }
+  return (await refreshDaywise(row)) ?? [];
+}
+
+// GMP list, or a single IPO's GMP with its day-wise history when ?ipo=<slug>.
+marketRouter.get('/gmp', async (req, res, next) => {
   try {
     if (req.query.ipo !== undefined) {
       const slug = parseSlug(req.query.ipo);
@@ -83,10 +116,10 @@ marketRouter.get('/gmp', (req, res, next) => {
       if (rows.length === 0) {
         return res.status(404).json({ error: { code: 'IPO_NOT_FOUND', message: `No GMP data for "${slug}".` } });
       }
+      const [row] = mergeBySlug(rows);
       return res.json({
         slug,
-        name: rows[0].name,
-        // One entry per source, so cross-source GMP can be compared.
+        name: row.name,
         gmp: rows.map((r) => ({
           value: r.gmp,
           trend: r.gmpTrend,
@@ -95,7 +128,8 @@ marketRouter.get('/gmp', (req, res, next) => {
           source: r.source,
           sourceUpdatedAt: r.sourceUpdatedAt,
         })),
-        history: getGmpHistory(slug, { limit: 60 }),
+        daywise: await daywise(row),
+        source: row.source,
         attribution,
       });
     }
@@ -127,42 +161,13 @@ marketRouter.get('/gmp', (req, res, next) => {
   }
 });
 
-// Live subscription (bidding) figures for one IPO.
-marketRouter.get('/subscription', (req, res, next) => {
-  try {
-    const slug = parseSlug(req.query.ipo ?? '');
-    const rows = getSubscription(slug);
-    if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ error: { code: 'SUBSCRIPTION_NOT_FOUND', message: `No subscription data for "${slug}".` } });
-    }
-    const total = rows.find((r) => r.category === 'Total');
-    res.json({
-      slug,
-      overall: total ? total.timesSubscribed : null,
-      categories: rows,
-      source: 'NSE',
-      note: 'Mainboard only; SME issues are not covered by this source.',
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// Unified IPO view: everything known about one IPO in a single call -- the
-// natural backing for a product IPO-detail page.
+// Everything known about one IPO in a single call.
 marketRouter.get('/ipo/:slug', (req, res, next) => {
   try {
     const slug = parseSlug(req.params.slug);
     const rows = getMarketIpoBySlug(slug);
     if (rows.length === 0) throw notFound('IPO_NOT_FOUND', `No IPO known with slug "${slug}".`);
-    // Descriptive fields come from the merged view so a gap in the leading
-    // source is filled rather than shown as blank; `gmp` below stays per-source,
-    // which is the point of this endpoint.
     const [primary] = mergeBySlug(rows);
-    const subs = getSubscription(slug);
-    const total = subs.find((s) => s.category === 'Total');
     const link = registrarSlugForMarket(slug);
 
     res.json({
@@ -179,19 +184,9 @@ marketRouter.get('/ipo/:slug', (req, res, next) => {
       },
       details: {
         priceBand: primary.priceBand,
-        faceValue: primary.faceValue,
         issueSize: primary.issueSize,
-        issueType: primary.issueType,
         lotSize: primary.lotSize,
-        minInvestment: primary.minInvestment,
-        // The smallest application the issue allows, as its own application
-        // table states it — one lot for mainboard, two for SME since July 2025.
-        // Published, not derived, so the estimated gain can be pointed at a
-        // source rather than argued for.
-        minApplicationShares: primary.minApplicationShares,
-        minApplicationLots: primary.minApplicationLots,
         listingExchanges: primary.listingExchanges,
-        nseSymbol: primary.nseSymbol,
       },
       gmp: rows.map((r) => ({
         value: r.gmp,
@@ -201,9 +196,7 @@ marketRouter.get('/ipo/:slug', (req, res, next) => {
         source: r.source,
         sourceUpdatedAt: r.sourceUpdatedAt,
       })),
-      subscription: subs.length
-        ? { overall: total ? total.timesSubscribed : null, categories: subs, source: 'NSE' }
-        : null,
+      subscription: primary.subscription !== null ? { overall: primary.subscription, source: primary.source } : null,
       allotment: link ? { available: true, ipo: link.registrar_slug } : { available: false },
       attribution,
     });

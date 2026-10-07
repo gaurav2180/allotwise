@@ -12,15 +12,27 @@ import { config } from '../src/config.js';
 import { cacheGet, cacheSet, cacheClear } from '../src/lib/cache.js';
 import { normalizeRecords } from '../src/registrars/kfintech.js';
 import { normalizeRecords as normalizeLinkintime, parseTables } from '../src/registrars/linkintime.js';
-import { parseCompanies } from '../src/registrars/bigshare.js';
+import {
+  parseCompanies,
+  interpret as bigshareInterpret,
+  normalizeRecords as normalizeBigshare,
+} from '../src/registrars/bigshare.js';
+import {
+  parseCompanies as parseMaashitla,
+  interpret as maashitlaInterpret,
+  normalizeRecords as normalizeMaashitla,
+} from '../src/registrars/maashitla.js';
 import { getRegistrar, supportedRegistrars } from '../src/registrars/index.js';
 import { parseDateRange, normalizeStatus, parseRupees, parseEstListing } from '../src/lib/marketDates.js';
-import { parse as parseIpoWatch, parseDetails } from '../src/gmp/ipowatch.js';
-import { parse as parseIpoJiGmp, parseListing, parseDetails as parseIpoJiDetails } from '../src/gmp/ipoji.js';
-const parseIpoJi = Object.assign(parseIpoJiGmp, { listing: parseListing });
-import { mergeBySlug, resolveGmp } from '../src/gmp/index.js';
+import {
+  parse as parseInvestorGain,
+  parseHistory as parseIgHistory,
+  parseIssuePage as parseIgIssuePage,
+  dayMonth,
+  decodeCfEmail,
+} from '../src/gmp/investorgain.js';
+import { mergeBySlug } from '../src/gmp/index.js';
 import { nameTokens, matchScore, bestMatch } from '../src/lib/ipoMatch.js';
-import { nseDate, normalizeCategory, parseSubscription } from '../src/market/nse.js';
 
 const REF = new Date('2026-09-04T00:00:00Z');
 
@@ -156,10 +168,10 @@ test('registrar dispatch classifies api vs deeplink and rejects unknowns', () =>
   assert.equal(typeof kfin.client.normalizeRecords, 'function');
   assert.equal(getRegistrar('linkintime').kind, 'api');
 
-  const bs = getRegistrar('bigshare');
-  assert.equal(bs.kind, 'deeplink');
-  assert.match(bs.url, /^https:\/\//);
-  assert.ok(bs.label);
+  // Bigshare dropped its captcha, and Maashitla never had one: both are now
+  // checked in-app like the other two.
+  assert.equal(getRegistrar('bigshare').kind, 'api');
+  assert.equal(getRegistrar('maashitla').kind, 'api');
 
   assert.throws(() => getRegistrar('nonesuch'), (e) => e.code === 'REGISTRAR_UNSUPPORTED');
   // Every advertised api registrar honours the shared client contract.
@@ -208,489 +220,145 @@ test('marketDates helpers normalize status, rupees, and est listing', () => {
   assert.deepEqual(parseEstListing('₹- (0.00%)'), { price: null, gainPct: 0 });
 });
 
-test('ipowatch.parse splits boards, avoids the Last-Updated/Date collision', () => {
-  // Header order deliberately puts "Last Updated" after "Date": "updated"
-  // contains the substring "date", so a naive matcher steals the date column.
-  const html = `
-    <h3>Mainboard IPO GMP</h3>
-    <table>
-      <tr><td>IPO Name</td><td>IPO GMP*</td><td>Trend</td><td>Price Band</td>
-          <td>Est. Listing</td><td>Date</td><td>Status</td><td>Last Updated</td></tr>
-      <tr><td>Veegaland Developers</td><td>₹18</td><td>🟢</td><td>₹140</td>
-          <td>₹158 (12.86%)</td><td>10-15 Sept</td><td>Upcoming</td><td>3 Sept, 17:09</td></tr>
-    </table>
-    <h3>SME IPO GMP</h3>
-    <table>
-      <tr><td>IPO Name</td><td>IPO GMP*</td><td>Trend</td><td>Price Band</td>
-          <td>Est. Listing</td><td>Date</td><td>Status</td><td>Last Updated</td></tr>
-      <tr><td>Amtech Esters</td><td>₹0</td><td>🟡</td><td>₹75</td>
-          <td>₹- (0.00%)</td><td>9-11 Sept</td><td>Upcoming</td><td>3 Sept, 17:09</td></tr>
-    </table>
-    <h3>Mainboard IPO GMP Performance</h3>
-    <table>
-      <tr><td>IPO Name</td><td>IPO Price</td><td>IPO GMP</td><td>Listing Price</td></tr>
-      <tr><td>Old IPO</td><td>₹788</td><td>₹290</td><td>₹961</td></tr>
-    </table>`;
-  const recs = parseIpoWatch(html, { ref: REF });
-  assert.equal(recs.length, 2, 'historical table (no Status column) must be skipped');
+// A row of InvestorGain's live table, verbatim in shape: cells are found by
+// `data-label`, the debut price is Cloudflare-obfuscated, "--" is unquoted.
+const igRow = ({ name, path, badges, gmp, pct = "0.00", sub = '-', price, size, lot, open, close, boa, listing, extra = '' }) => `
+  <tr><td data-label="Name"><div class="report-td"><div class="mono-num"><a href="${path}" title="${name}" target="_parent">${name}</a> ${badges
+    .map((b) => `<span class="badge rounded-pill bg-secondary d-inline ms-2">${b}</span>`)
+    .join('')}${extra}</div></div></td>
+  <td data-label="GMP"><div class="report-td"><div class="mono-num">&#8377;<b>${gmp}</b> (${pct}%)<br><small><b>0 ↓ / 0 ↑</b></small></div></div></td>
+  <td data-label="Rating"><div>&#128293;</div></td>
+  <td data-label="Sub"><div class="mono-num">${sub}</div></td>
+  <td data-label="Price (₹)"><div class="mono-num">${price}</div></td>
+  <td data-label="IPO Size"><div class="mono-num">&#8377;${size} Cr</div></td>
+  <td data-label="Lot"><div class="mono-num">${lot}</div></td>
+  <td data-label="Open"><div class="mono-num">${open}</div></td>
+  <td data-label="Close"><div class="mono-num">${close}</div></td>
+  <td data-label="BoA Dt"><div class="mono-num">${boa}</div></td>
+  <td data-label="Listing"><div class="mono-num">${listing}</div></td>
+  <td data-label="Updated-On"><div class="mono-num"><small><b>2-Oct 11:37</b></small></div></td>
+  <td data-label="Anchor"><div>✅</div></td></tr>`;
 
-  const veg = recs.find((r) => r.slug === 'veegaland-developers');
-  assert.equal(veg.board, 'mainboard');
-  assert.equal(veg.gmp, 18);
-  assert.equal(veg.openDate, '2026-09-10'); // not the "3 Sept" from Last Updated
-  assert.equal(veg.closeDate, '2026-09-15');
-  assert.equal(veg.estListingPrice, 158);
-  assert.equal(veg.status, 'upcoming');
-  assert.equal(veg.sourceUpdatedAt, '3 Sept, 17:09');
+// "L@455.00" under Cloudflare's address obfuscation (key 0x6d).
+const CF_L455 = '<span class="text-success"><small><b><a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="6d212d595858435d5d">[email&#160;protected]</a> (12.35%)</b></small></span>';
 
-  const amt = recs.find((r) => r.slug === 'amtech-esters');
-  assert.equal(amt.board, 'sme', 'row after the SME heading must be tagged sme');
+const IG_TABLE = `<table><tr><th>Name</th><th>GMP</th></tr>${[
+  igRow({ name: 'Nityas Gems &amp; Jewellery', path: '/gmp/nityas-gems-jewellery-ipo/2235/', badges: ['IPO', 'O'], gmp: '3', pct: '4.00', sub: '0.69x', price: '75', size: '108.35', lot: '200', open: '30-Sep<br><small><b>GMP: 5</b></small>', close: '5-Oct', boa: '6-Oct', listing: '8-Oct' }),
+  igRow({ name: 'TNA Solutions', path: '/gmp/tna-solutions-ipo/2370/', badges: ['BSE SME', 'O'], gmp: '6', pct: '8.57', sub: '1.71x', price: '70', size: '37.86', lot: '2,000', open: '30-Sep', close: '6-Oct', boa: '7-Oct', listing: '9-Oct' }),
+  igRow({ name: 'Runwal Enterprises', path: '/gmp/runwal-enterprises-ipo/1711/', badges: ['IPO', 'C'], gmp: '-5', pct: '-1.64', sub: '2.64x', price: '305', size: '500.00', lot: '49', open: '25-Sep', close: '29-Sep', boa: '30-Sep', listing: '5-Oct' }),
+  igRow({ name: 'R.K.Fashion Accessories', path: '/gmp/rk-fashion-ipo/2400/', badges: ['NSE SME', 'U'], gmp: '--', price: '82', size: '34.99', lot: '1,600', open: '5-Oct', close: '7-Oct', boa: '8-Oct', listing: '12-Oct' }),
+  igRow({ name: 'A-One Steels', path: '/gmp/a-one-steels-ipo/1611/', badges: ['IPO'], extra: CF_L455, gmp: '46', sub: '12.23x', price: '405', size: '405.00', lot: '37', open: '24-Sep', close: '28-Sep', boa: '29-Sep', listing: '1-Oct' }),
+].join('')}</table>`;
+
+const IG_REF = new Date('2026-10-02T08:00:00Z');
+
+test('investorgain.parse reads every field the list shows, from one table', () => {
+  const rows = parseInvestorGain(IG_TABLE, { ref: IG_REF });
+  assert.equal(rows.length, 5);
+  const by = Object.fromEntries(rows.map((r) => [r.slug, r]));
+
+  const nityas = by['nityas-gems-jewellery'];
+  assert.equal(nityas.name, 'Nityas Gems & Jewellery', 'entities decoded before the slug is made');
+  assert.equal(nityas.board, 'mainboard');
+  assert.equal(nityas.status, 'open');
+  assert.equal(nityas.gmp, 3);
+  assert.equal(nityas.priceBand, '₹75');
+  assert.equal(nityas.estListingPrice, 78);
+  assert.equal(nityas.estGainPct, 4);
+  assert.equal(nityas.lotSize, 200);
+  assert.equal(nityas.issueSize, '₹108.35 Cr');
+  assert.equal(nityas.subscription, 0.69);
+  assert.equal(nityas.openDate, '2026-09-30', 'the "GMP: 5" note under the date is ignored');
+  assert.equal(nityas.closeDate, '2026-10-05');
+  assert.equal(nityas.allotmentDate, '2026-10-06');
+  assert.equal(nityas.listingDate, '2026-10-08');
+  assert.equal(nityas.sourcePath, '/gmp/nityas-gems-jewellery-ipo/2235/');
+  assert.equal(nityas.source, 'investorgain');
+
+  const tna = by['tna-solutions'];
+  assert.equal(tna.board, 'sme', 'an exchange badge naming SME is the board');
+  assert.equal(tna.listingExchanges, 'BSE SME');
+  assert.equal(tna.lotSize, 2000);
+
+  assert.equal(by['runwal-enterprises'].gmp, -5, 'a negative premium keeps its sign');
+  assert.equal(by['runwal-enterprises'].status, 'closed');
+  assert.equal(by['runwal-enterprises'].estGainPct, -1.64);
+
+  const rk = by['r-k-fashion-accessories'];
+  assert.equal(rk.gmp, 0, '"₹ -- (0.00%)" is how the source writes a zero premium');
+  assert.equal(rk.estGainPct, 0);
+  assert.equal(rk.estListingPrice, 82);
+  assert.equal(rk.subscription, null);
+  assert.equal(rk.status, 'upcoming');
+
+  const aone = by['a-one-steels'];
+  assert.equal(aone.listingPrice, 455, 'the obfuscated debut price is decoded');
+  assert.equal(aone.status, 'listed');
 });
 
-test('ipoji.parse reads the data attributes and full offer dates', () => {
-  const html = `
-    <tr class="gmp-row" data-type="sme" data-status="open" data-hasgmp="true"
-        data-gmp="42" data-pct="33" data-indicative="169"
-        data-name="Qualiance International" data-rowurl="/ipo-gmp/qualiance-international-ipo">
-      <td class="gmp-col-name" data-label="IPO"><a href="/ipo/qualiance-international-ipo">Qualiance International IPO</a></td>
-      <td class="gmp-num" data-label="Price Band">&#8377;120-127</td>
-      <td class="gmp-num" data-label="GMP">+&#8377;42</td>
-      <td class="gmp-secondary" data-label="Open &#8211; Close"><span class="gmp-dates">Sep 4, 2026 &#8211; Sep 8, 2026</span></td>
-      <td class="gmp-secondary" data-label="Last Updated">6 Sep 2026, 7:30 PM IST</td>
-    </tr>
-    <tr class="gmp-row" data-type="mainboard" data-status="upcoming" data-hasgmp="false"
-        data-gmp="0" data-pct="0" data-indicative="0" data-name="Manika Plastech">
-      <td data-label="Price Band">&#8377;-</td>
-      <td data-label="Open &#8211; Close">Sep 11, 2026 &#8211; Sep 16, 2026</td>
+test('investorgain dates take the year nearest the reading', () => {
+  assert.equal(decodeCfEmail('6d212d595858435d5d'), 'L@455.00');
+  assert.equal(dayMonth('30-Sep', IG_REF), '2026-09-30');
+  // Across the turn of the year, both ways.
+  assert.equal(dayMonth('2-Jan', new Date('2026-12-30T00:00:00Z')), '2027-01-02');
+  assert.equal(dayMonth('28-Dec', new Date('2027-01-03T00:00:00Z')), '2026-12-28');
+  assert.equal(dayMonth('--', IG_REF), null);
+  assert.equal(dayMonth('31-Feb', IG_REF), null);
+});
+
+test('investorgain day-wise history is one point per day, oldest first, with change', () => {
+  const r = (when, gmp, pct, est, profit) => `
+    <tr class="">
+      <td class="col-sticky" data-title="GMP Date & Time">${when}<br> <span class="gmp-badge badge-open">O</span></td>
+      <td data-title="GMP" class="pos">₹${gmp} <span class="pos">(${pct}%)</span> <span class="trend-pill">─</span></td>
+      <td data-title="Est. Listing Price">₹${est}</td>
+      <td data-title="Est. Profit" class="pos">₹${profit}</td>
+      <td data-title="Trend">Stable</td>
     </tr>`;
+  const html = `<table><tr><th>GMP Date</th><th>GMP</th></tr>
+    ${r('2-Oct 12:37', 3, '4.00', 78, 600)}
+    ${r('1-Oct 23:37', 3, '4.00', 78, 600)}
+    ${r('1-Oct 09:02', 4, '5.33', 79, 800)}
+    ${r('30-Sep 23:37', 5, '6.67', 80, '1,000')}
+    ${r('29-Sep 23:37', 5, '6.67', 80, '1,000')}
+    ${r('28-Sep 23:37', 9, '12.00', 84, '1,800')}</table>`;
 
-  const [q, m] = parseIpoJi(html);
-  assert.equal(q.slug, 'qualiance-international');
-  assert.equal(q.board, 'sme');
-  assert.equal(q.gmp, 42);
-  assert.equal(q.estGainPct, 33);
-  assert.equal(q.estListingPrice, 169);
-  assert.equal(q.status, 'open');
-  // Full dates, so unlike IPO Watch's "28-1 Sept" there is no year to infer.
-  assert.equal(q.openDate, '2026-09-04');
-  assert.equal(q.closeDate, '2026-09-08');
-  assert.equal(q.sourceUpdatedAt, '6 Sep 2026, 7:30 PM IST');
-
-  // Not yet quoted is not a premium of zero, even though the attributes read 0.
-  assert.equal(m.gmp, null);
-  assert.equal(m.estListingPrice, null);
-  assert.equal(m.openDate, '2026-09-11');
-
-  // An entity in an attribute has to decode too. The calendar card decodes its
-  // text, so leaving `data-name` raw gave the two pages different names for one
-  // company -- "Manipal Payment &amp; Identity Solutions" against "Manipal
-  // Payment & Identity Solutions" -- and therefore different slugs, which put
-  // it in the list twice from a single source.
-  const [amp] = parseIpoJi(
-    '<tr class="gmp-row" data-type="sme" data-status="open" data-hasgmp="false" data-name="Manipal Payment &amp; Identity Solutions"></tr>'
-  );
-  assert.equal(amp.name, 'Manipal Payment & Identity Solutions');
-  assert.equal(amp.slug, 'manipal-payment-identity-solutions');
-  assert.equal(
-    amp.slug,
-    parseIpoJi.listing(
-      '<article class="card ipo-card" data-ipo-board="sme"><h3 class="ipo-card-name">Manipal Payment &amp; Identity Solutions</h3></article>'
-    )[0].slug,
-    'both pages must produce the same slug for the same company'
-  );
+  const points = parseIgHistory(html, { ref: IG_REF });
+  // IPOwiz's screen for this issue: 9, 5, 5, 3, 3.
+  assert.deepEqual(points.map((p) => p.gmp), [9, 5, 5, 3, 3]);
+  assert.deepEqual(points.map((p) => p.change), [null, -4, 0, -2, 0]);
+  assert.equal(points[0].date, '2026-09-28');
+  assert.equal(points[3].gmp, 3, "a day's latest reading wins over its earlier one");
+  assert.equal(points[0].profit, 1800);
+  assert.equal(points[4].indicative, 78);
+  assert.equal(points[4].pct, 4);
 });
 
-test('ipoji.parseDetails reads the published minimum application', () => {
-  // The issue's own application table, which is what makes the estimated gain
-  // a sourced figure rather than a derived one. Mainboard says "Retail", SME
-  // says "Individual", and since July 2025 the SME minimum is two lots.
-  const table = (rows) =>
-    `<table><tr><th>Application</th><th>Lots</th><th>Shares</th><th>Amount</th></tr>${rows}</table>`;
-  const row = (label, lots, shares, amount) =>
-    `<tr><td>${label}</td><td>${lots}</td><td>${shares}</td><td>${amount}</td></tr>`;
+test('investorgain issue page yields the band, exchanges and logo', () => {
+  const html = `<script>self.__next_f.push([1,"is set issue \\\\u003ca href=\\\\\\"/keyword/price-band/280\\\\\\"\\\\u003eprice band\\\\u003c/a\\\\u003e at ₹70 to ₹75 per share. It will list on NSE and BSE with a date."])</script>
+    <script>self.__next_f.push([1,"[\\"$\\",\\"meta\\",\\"7\\",{\\"property\\":\\"og:image\\",\\"content\\":\\"https://www.chittorgarh.net/images/ipo/nityas-logo.jpg\\"}]"])</script>`;
+  const page = parseIgIssuePage(html);
+  assert.equal(page.priceBand, '₹70 to ₹75');
+  assert.equal(page.listingExchanges, 'NSE, BSE');
+  assert.equal(page.logo, 'https://www.chittorgarh.net/images/ipo/nityas-logo.jpg');
 
-  const sme = parseIpoJiDetails(
-    table(
-      row('Individual (min)', '2', '1,200', '₹2,23,200') +
-        row('Individual(max)', '2', '1,200', '₹2,23,200') +
-        row('sHNI(min)', '3', '1,800', '₹3,34,800')
-    )
-  );
-  assert.equal(sme.minApplicationShares, 1200);
-  assert.equal(sme.minApplicationLots, 2);
-  // The amount comes from the same row as the share count, so the two always
-  // describe one application.
-  assert.equal(sme.minInvestment, 223200);
-
-  const mainboard = parseIpoJiDetails(
-    table(row('Retail (min)', '1', '8', '₹14,280') + row('Retail(max)', '14', '112', '₹1,99,920'))
-  );
-  assert.equal(mainboard.minApplicationShares, 8);
-  assert.equal(mainboard.minApplicationLots, 1);
-  assert.equal(mainboard.minInvestment, 14280);
-
-  // An sHNI row must never be mistaken for the retail minimum.
-  const hniOnly = parseIpoJiDetails(table(row('sHNI(min)', '3', '1,800', '₹3,34,800')));
-  assert.equal(hniOnly.minApplicationShares, null);
-
-  // No table yet — the issue is announced but not priced. Nothing is invented.
-  const none = parseIpoJiDetails('<html><body>nothing here</body></html>');
-  assert.equal(none.minApplicationShares, null);
-  assert.equal(none.minApplicationLots, null);
+  // The site's own card is not the company's logo.
+  const generic = parseIgIssuePage('<meta property="og:image" content="https://www.chittorgarh.net/ig/images/logo/investorgain-og-logo.png">');
+  assert.equal(generic.logo, null);
 });
 
-test('ipoji.parseDetails prefers the fact list and falls back to the timeline', () => {
-  const html = `
-    <dl class="fact-item"><dt class="fact-label"><i></i> Issue size</dt><dd class="fact-value">&#8377;45.11 Cr</dd></dl>
-    <dl class="fact-item"><dt class="fact-label"><i></i> Lot size</dt><dd class="fact-value">1000</dd></dl>
-    <dl class="fact-item"><dt class="fact-label"><i></i> Minimum Investment</dt><dd class="fact-value">&#8377;2,54,000</dd></dl>
-    <dl class="fact-item"><dt class="fact-label"><i></i> Listing At</dt><dd class="fact-value">NSE SME</dd></dl>
-    <li class="step"><p class="step-date done-label">Sep 9, 2026</p><p class="step-label done-label">Allotment Date</p></li>
-    <li class="step"><p class="step-date done-label">Sep 11, 2026</p><p class="step-label done-label">Listing Date</p></li>`;
-
-  const d = parseIpoJiDetails(html);
-  // A rupee amount as published, never a share count.
-  assert.equal(d.issueSize, '₹45.11 Cr');
-  assert.equal(d.lotSize, 1000);
-  assert.equal(d.minInvestment, 254000);
-  assert.equal(d.listingExchanges, 'NSE SME');
-  // Absent from the fact list here, so these come from the timeline.
-  assert.equal(d.allotmentDate, '2026-09-09');
-  assert.equal(d.listingDate, '2026-09-11');
-
-  // The page's own em dash for "not published yet" must not become a value.
-  assert.equal(
-    parseIpoJiDetails('<dl class="fact-item"><dt class="fact-label">Minimum Investment</dt><dd class="fact-value">—</dd></dl>')
-      .minInvestment,
-    null
-  );
-});
-
-test('ipoji.parseListing reads the calendar cards and derives status from the dates', () => {
-  const card = (slug, name, open, close, status, board, price, lot, size, premium) => `
-    <article class="card ipo-card" data-agent-href="/ipo/${slug}" data-ipo-status="${status}" data-ipo-board="${board}">
-      <h3 class="ipo-card-name" title="${name} Limited IPO">${name}</h3>
-      <div class="ipo-card-date"><time datetime="${open}">x</time> – <time datetime="${close}">y</time></div>
-      <div><span class="ipo-card-secondary-label">Offer Price</span><span class="ipo-card-body-value">${price}</span></div>
-      <div><span class="ipo-card-secondary-label">Lot Size</span><span class="ipo-card-body-value">${lot}</span></div>
-      <div><span class="ipo-card-secondary-label">Issue Size</span><span class="ipo-card-body-value">${size}</span></div>
-      <div><span class="ipo-card-secondary-label">Exp. Premium</span><span class="ipo-card-body-value">${premium}</span></div>
-    </article>`;
-
-  const html =
-    card('national-stock-exchange-of-india-ipo', 'National Stock Exchange of India', '2026-09-17', '2026-09-21',
-         'current', 'mainboard', '₹1700-1785', '8', '₹22561.57 Cr', '₹208 <small>(12%)</small>') +
-    card('open-one-ipo', 'Open One', '2026-09-10', '2026-09-14', 'current', 'sme', '₹56-59', '2000', '₹26.93 Cr', '—') +
-    card('gone-by-ipo', 'Gone By', '2026-09-01', '2026-09-03', 'listed', 'sme', '₹87-92', '1600', '₹45 Cr', '-₹6 (-7%)');
-
-  const [nse, open, listed] = parseIpoJi.listing(html, { ref: new Date('2026-09-12T00:00:00Z') });
-
-  assert.equal(nse.slug, 'national-stock-exchange-of-india');
-  assert.equal(nse.board, 'mainboard');
-  assert.equal(nse.openDate, '2026-09-17');
-  assert.equal(nse.closeDate, '2026-09-21');
-  assert.equal(nse.priceBand, '₹1700-1785', 'the full band, not just the cap price');
-  assert.equal(nse.issueSize, '₹22561.57 Cr');
-  assert.equal(nse.lotSize, 8);
-  assert.equal(nse.gmp, 208);
-  assert.equal(nse.estGainPct, 12);
-  // The card says "current" for anything not yet listed, so open vs upcoming
-  // comes from the dates instead.
-  assert.equal(nse.status, 'upcoming', 'opens in five days');
-  assert.equal(open.status, 'open', 'reference date sits inside the window');
-  assert.equal(listed.status, 'listed', 'the one status the dates cannot give');
-
-  // An em dash is "not quoted yet", which is not a premium of zero.
-  assert.equal(open.gmp, null);
-  // A discount is a real, negative premium.
-  assert.equal(listed.gmp, -6);
-  assert.equal(listed.estGainPct, -7);
-});
-
-test('board comes from the exchange badge, not the board attribute', () => {
-  // The source's own `data-ipo-board` says "sme" for eight mainboard issues --
-  // PhonePe, SK Finance, Credila, InCred, Avanse, IndiaFirst, Prestige
-  // Hospitality, Veritas Finance -- while their badge correctly reads
-  // "BSE, NSE". Believing the attribute filed multi-thousand-crore mainboard
-  // IPOs under SME, which is both the wrong filter and the wrong minimum
-  // application (two lots on SME against one on mainboard).
-  const card = (name, attrBoard, badge) => `
-    <article class="card ipo-card" data-agent-href="/ipo/${name}-ipo" data-ipo-status="upcoming" data-ipo-board="${attrBoard}">
-      <h3 class="ipo-card-name">${name}</h3>
-      <span class="ipo-card-market-badge" data-ipotype="${badge}">${badge}</span>
-    </article>`;
-
-  const boards = (html) => parseIpoJi.listing(html).map((r) => [r.name, r.board]);
-
-  assert.deepEqual(
-    boards(
-      card('PhonePe', 'sme', 'BSE, NSE') +
-        card('Om Galaxy', 'sme', 'BSE SME') +
-        card('Qualiance', 'sme', 'NSE SME') +
-        card('NSE', 'mainboard', 'Mainboard')
-    ),
-    [
-      ['PhonePe', 'mainboard'],
-      ['Om Galaxy', 'sme'],
-      ['Qualiance', 'sme'],
-      ['NSE', 'mainboard'],
-    ]
-  );
-
-  // No badge at all: the attribute is all there is, so it is used.
-  assert.deepEqual(boards(card('Badgeless', 'sme', '')), [['Badgeless', 'sme']]);
-});
-
-test('ipoji.parseListing reads the debut price once an issue has listed', () => {
-  // A listed card drops "Exp. Premium" and prints "List Price" instead. Missing
-  // that left listed rows showing a stale forecast or nothing at all -- one had
-  // listed 20% down and the row said nothing.
-  const card = (name, listPrice) => `
-    <article class="card ipo-card" data-agent-href="/ipo/${name}-ipo" data-ipo-status="listed" data-ipo-board="sme">
-      <h3 class="ipo-card-name">${name}</h3>
-      <div><time datetime="2026-09-01">x</time> <time datetime="2026-09-03">y</time></div>
-      <div><span class="ipo-card-secondary-label">Offer Price</span><span class="ipo-card-body-value">₹102</span></div>
-      <div><span class="ipo-card-secondary-label">List Price</span><span class="ipo-card-body-value">${listPrice}</span></div>
-    </article>`;
-
-  assert.equal(parseIpoJi.listing(card('Fly Hi', '81.6'))[0].listingPrice, 81.6);
-
-  // Mainboard lists on two exchanges and the value says which: "221.0(NSE)".
-  // Stripping punctuation gave "221.0NSE", which parsed as NaN and silently
-  // dropped the outcome for exactly those issues.
-  assert.equal(parseIpoJi.listing(card('Deepa', '221.0(NSE)'))[0].listingPrice, 221);
-  assert.equal(parseIpoJi.listing(card('Rays', '₹239.0 (BSE)'))[0].listingPrice, 239);
-
-  // Listed but the debut price not published yet is a real state, not a zero.
-  assert.equal(parseIpoJi.listing(card('Pending', '—'))[0].listingPrice, null);
-  assert.equal(parseIpoJi.listing(card('Pending', 'N/A'))[0].listingPrice, null);
-});
-
-test('a second CALENDAR source is what puts an IPO in the list twice', () => {
-  // The bug in one assertion, and the reason the guard sits on the calendar
-  // source rather than on the premium chain. IPO Watch called this issue "NSE";
-  // IPO Ji calls it "National Stock Exchange of India". Same company, no shared
-  // slug and no shared name token, so nothing downstream can reconcile them --
-  // mergeBySlug keys on the slug and the fuzzy matcher scores this pair at zero.
-  assert.notEqual(slugify('NSE'), slugify('National Stock Exchange of India'));
-  assert.equal(matchScore('NSE', 'National Stock Exchange of India'), 0);
-
+test('mergeBySlug keeps one row per IPO and prefers the live source', () => {
   const rows = [
-    { slug: 'nse', source: 'ipowatch', name: 'NSE', gmp: 218 },
-    { slug: 'national-stock-exchange-of-india', source: 'ipoji', name: 'National Stock Exchange of India', gmp: 208 },
+    { slug: 'acme', source: 'ipoji', gmp: 40 },
+    { slug: 'acme', source: 'investorgain', gmp: 55 },
+    { slug: 'zeta', source: 'investorgain', gmp: 12 },
   ];
-  assert.equal(mergeBySlug(rows).length, 2, 'deduplication cannot save two row sources');
-
-  // Which is why exactly one source decides what exists...
-  assert.equal(config.gmp.calendarSource, 'ipoji');
-  assert.ok(!config.gmp.calendarSource.includes(','));
-  // ...while any number may supply a premium, because those only fill values
-  // onto rows that already exist.
-  assert.ok(config.gmp.sources.length >= 1);
-  assert.equal(config.gmp.sources[0], 'ipowatch', 'the best-covering tracker leads for every board');
+  const merged = mergeBySlug(rows);
+  assert.equal(merged.length, 2);
+  assert.equal(merged.find((r) => r.slug === 'acme').gmp, 55);
 });
 
-test('a second calendar source cannot be configured by accident', async () => {
-  const run = (env) =>
-    new Promise((resolve) => {
-      const child = spawn(
-        process.execPath,
-        ['-e', "import('./src/config.js').then(m => console.log(m.config.gmp.calendarSource + '|' + m.config.gmp.sources.join(',')))"],
-        { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] }
-      );
-      let out = '';
-      let err = '';
-      child.stdout.on('data', (c) => (out += c));
-      child.stderr.on('data', (c) => (err += c));
-      child.on('close', (code) => resolve({ code, out: out.trim(), err }));
-    });
 
-  // Two calendar sources must not boot, and the error has to explain why --
-  // duplicated rows surfacing hours after a config edit is the failure being
-  // prevented, and nobody connects the two.
-  const refused = await run({ GMP_CALENDAR_SOURCE: 'ipoji,ipowatch' });
-  assert.notEqual(refused.code, 0, 'two calendar sources must not boot');
-  assert.match(refused.err, /exactly one source/);
-  assert.match(refused.err, /National Stock Exchange of India/);
-
-  // A long premium chain is fine: it cannot create a row.
-  const chained = await run({ GMP_SOURCES: 'ipowatch,ipoji' });
-  assert.equal(chained.code, 0);
-  assert.equal(chained.out, 'ipoji|ipowatch,ipoji');
-
-  // And the calendar source can be swapped, just not doubled.
-  const swapped = await run({ GMP_CALENDAR_SOURCE: 'ipowatch' });
-  assert.equal(swapped.code, 0);
-  assert.match(swapped.out, /^ipowatch\|/);
-});
-
-test('resolveGmp never adds, renames or removes a row', async () => {
-  // The invariant the whole split rests on: premium sources fill values onto
-  // rows the calendar already created. As a *row* source IPO Watch calls one
-  // issue "NSE" where IPO Ji says "National Stock Exchange of India", and the
-  // list doubles -- so the chain may be any length only because it cannot do
-  // this.
-  const rows = [
-    { slug: 'quoted', name: 'Quoted Issue', priceBand: '₹100-110', gmp: 20, source: 'ipoji' },
-    { slug: 'silent', name: 'Silent Issue', priceBand: '₹85-90', gmp: null, source: 'ipoji' },
-    { slug: 'unknown-to-both', name: 'Nobody Quotes This', priceBand: '₹50', gmp: null, source: 'ipoji' },
-  ];
-  const before = rows.map((r) => r.slug);
-
-  await resolveGmp(rows, {
-    injected: {
-      meta: { id: 'ipowatch' },
-      fetchGmp: async () => [
-        { slug: 'silent-issue', name: 'Silent Issue', gmp: 7 },
-        { slug: 'nse', name: 'NSE', gmp: 99 },
-        { slug: 'some-other-ipo', name: 'Some Other IPO Entirely', gmp: 99 },
-      ],
-    },
-  });
-
-  assert.deepEqual(rows.map((r) => r.slug), before, 'row set must be untouched');
-  // No match, no invention.
-  assert.equal(rows[2].gmp, null);
-  assert.equal(rows[2].gmpSource, null);
-});
-
-test('resolveGmp re-resolves every row, so the board cannot decide the tracker', async () => {
-  // The bug this refactor exists to kill. The calendar's own premium used to be
-  // authoritative and a second tracker only filled gaps -- and because IPO Ji
-  // quotes almost no SME, SME rows came from one tracker and mainboard rows
-  // from another, so two rows in one list were not comparable.
-  const rows = [
-    { slug: 'mainboard-issue', name: 'Kanohar Electricals', board: 'mainboard', priceBand: '₹100', gmp: 20, source: 'ipoji' },
-    { slug: 'sme-issue', name: 'Qualiance International', board: 'sme', priceBand: '₹100', gmp: null, source: 'ipoji' },
-  ];
-
-  await resolveGmp(rows, {
-    injected: {
-      meta: { id: 'ipowatch' },
-      fetchGmp: async () => [
-        { slug: 'kanohar', name: 'Kanohar Electricals', gmp: 30 },
-        { slug: 'qualiance', name: 'Qualiance International', gmp: 8 },
-      ],
-    },
-  });
-
-  // The leading link answers both, including the row the calendar had quoted.
-  assert.equal(rows[0].gmp, 30, 'a calendar premium does not outrank the chain');
-  assert.equal(rows[1].gmp, 8);
-  assert.deepEqual([...new Set(rows.map((r) => r.gmpSource))], ['ipowatch'], 'one tracker for both boards');
-});
-
-test('resolveGmp keeps the rows when a source is down', async () => {
-  const rows = [{ slug: 'a', name: 'Alpha Issue', priceBand: '₹10', gmp: 3, source: 'ipoji' }];
-  const result = await resolveGmp(rows, {
-    injected: { meta: { id: 'down' }, fetchGmp: async () => { throw new Error('upstream down'); } },
-  });
-  assert.equal(result.resolved, 0);
-  assert.equal(rows.length, 1, 'a failed source must not cost the rows');
-});
-
-test('every row resolveGmp answers is arithmetically self-consistent', async () => {
-  // Whichever tracker supplies the premium, the percentage and the indicative
-  // listing price are computed from OUR band, so the three figures on a row
-  // always agree with each other -- which is what a reader actually checks.
-  const rows = [
-    { slug: 'a', name: 'Alpha Issue', priceBand: '₹85-90', gmp: null, source: 'ipoji' },
-    { slug: 'b', name: 'Beta Issue', priceBand: '₹71 to ₹75 Per Share', gmp: null, source: 'ipoji' },
-    { slug: 'c', name: 'Gamma Issue', priceBand: '₹1,700-1,785', gmp: null, source: 'ipoji' },
-    // No band announced: a premium can still be shown, but no percentage can be
-    // derived from nothing, and none is invented.
-    { slug: 'd', name: 'Delta Issue', priceBand: null, gmp: null, source: 'ipoji' },
-  ];
-
-  await resolveGmp(rows, {
-    injected: {
-      meta: { id: 'ipowatch' },
-      fetchGmp: async () => [
-        { slug: 'alpha', name: 'Alpha Issue', gmp: 7 },
-        { slug: 'beta', name: 'Beta Issue', gmp: 10 },
-        { slug: 'gamma', name: 'Gamma Issue', gmp: 208 },
-        { slug: 'delta', name: 'Delta Issue', gmp: 5 },
-      ],
-    },
-  });
-
-  for (const row of rows.slice(0, 3)) {
-    const cap = Math.max(...String(row.priceBand).replace(/,/g, '').match(/\d+(?:\.\d+)?/g).map(Number));
-    assert.equal(row.estGainPct, Number(((row.gmp / cap) * 100).toFixed(2)), row.slug);
-    assert.equal(row.estListingPrice, cap + row.gmp, row.slug);
-  }
-  assert.equal(rows[1].estGainPct, 13.33, 'commas and "Per Share" must not break the cap');
-  assert.equal(rows[2].estGainPct, 11.65);
-
-  assert.equal(rows[3].gmp, 5);
-  assert.equal(rows[3].estGainPct, null, 'no band, so no percentage rather than a wrong one');
-  assert.equal(rows[3].estListingPrice, null);
-});
-
-test('resolveGmp moves down the chain when a link is down or silent', async () => {
-  const rows = [
-    { slug: 'a', name: 'Alpha Issue', priceBand: '₹100', gmp: null, source: 'ipoji' },
-    { slug: 'b', name: 'Beta Issue', priceBand: '₹100', gmp: null, source: 'ipoji' },
-  ];
-
-  const down = { meta: { id: 'down' }, fetchGmp: async () => { throw new Error('502'); } };
-  const partial = {
-    meta: { id: 'partial' },
-    fetchGmp: async () => [{ slug: 'alpha', name: 'Alpha Issue', gmp: 4 }],
-  };
-  const last = {
-    meta: { id: 'last' },
-    // Would overwrite Alpha too if a later link were re-offered a filled row,
-    // which it must not be: the first link with a figure wins.
-    fetchGmp: async () => [
-      { slug: 'alpha', name: 'Alpha Issue', gmp: 99 },
-      { slug: 'beta', name: 'Beta Issue', gmp: 6 },
-    ],
-  };
-
-  // Each call is one link; a real run walks them inside a single call.
-  for (const source of [down, partial, last]) {
-    const pending = rows.filter((r) => r.gmp === null).map((r) => ({ ...r }));
-    const out = await resolveGmp(pending, { injected: source });
-    if (!out.resolved) continue;
-    for (const p of pending) {
-      if (p.gmp === null) continue;
-      const row = rows.find((r) => r.slug === p.slug);
-      Object.assign(row, p);
-    }
-  }
-
-  assert.equal(rows[0].gmp, 4, 'the first link with a figure wins');
-  assert.equal(rows[0].gmpSource, 'partial');
-  assert.equal(rows[1].gmp, 6, 'a later link covers what the earlier one missed');
-  assert.equal(rows[1].gmpSource, 'last');
-});
-
-test('mergeBySlug collapses per-source rows without mixing one quote with another', () => {
-  const rows = [
-    { slug: 'acme', source: 'ipowatch', gmp: 55, estListingPrice: 200, priceBand: '₹140-145', lotSize: 100 },
-    { slug: 'acme', source: 'ipoji', gmp: 40, estListingPrice: 185, priceBand: null, lotSize: null },
-    { slug: 'zeta', source: 'ipowatch', gmp: null, estListingPrice: null, priceBand: '₹90-95', lotSize: 50 },
-    { slug: 'zeta', source: 'ipoji', gmp: 12, estListingPrice: 107, priceBand: null, lotSize: null },
-  ];
-
-  const [acme, zeta] = mergeBySlug(rows);
-  assert.equal(mergeBySlug(rows).length, 2, 'one row per IPO, not one per source');
-
-  // The configured leader wins outright, and its premium and indicative price
-  // travel together -- ₹40 with ₹200 is a number neither source published.
-  assert.equal(acme.source, 'ipoji');
-  assert.equal(acme.gmp, 40);
-  assert.equal(acme.estListingPrice, 185);
-  // Descriptive gaps are still filled from the other source.
-  assert.equal(acme.priceBand, '₹140-145');
-  assert.equal(acme.lotSize, 100);
-
-  // A leader with no quote at all does not outrank one that has an answer.
-  assert.equal(zeta.source, 'ipoji');
-  assert.equal(zeta.gmp, 12);
-  assert.equal(zeta.priceBand, '₹90-95');
-});
 
 test('ipoMatch links names that differ across sources, without false positives', () => {
   // Real cross-source pairs seen in the data.
@@ -703,7 +371,17 @@ test('ipoMatch links names that differ across sources, without false positives',
   // A single short shared token is not enough signal.
   assert.equal(matchScore('NSE Limited', 'NSDL Limited'), 0);
 
-  assert.deepEqual(nameTokens('TEMPSENS INSTRUMENTS (INDIA) LIMITED'), ['tempsens', 'instruments', 'india']);
+  // Plurals fold to one form on both sides, so a brand ending in "s" folds too
+  // — harmless, since every name being compared goes through the same rule.
+  assert.deepEqual(nameTokens('TEMPSENS INSTRUMENTS (INDIA) LIMITED'), ['tempsen', 'instrument', 'india']);
+
+  // Singular and plural are one company.
+  assert.equal(matchScore('Runwal Enterprise Limited - IPO', 'Runwal Enterprises'), 1);
+  // Two different companies sharing only generic words must never link: this
+  // pair scored exactly the threshold and could have pointed one company's
+  // allotment check at the other's registrar entry.
+  assert.equal(matchScore('ADROIT INDUSTRIES INDIA LTD', 'Acme India Industries'), 0);
+  assert.equal(matchScore('ADROIT INDUSTRIES INDIA LTD', 'Adroit Industries'), 1);
 
   const candidates = [
     { slug: 'purple-style-labs', name: 'Purple Style Labs' },
@@ -712,62 +390,6 @@ test('ipoMatch links names that differ across sources, without false positives',
   const m = bestMatch('PURPLE STYLE LABS LIMITED', candidates);
   assert.equal(m.slug, 'purple-style-labs');
   assert.equal(bestMatch('Totally Unrelated Company', candidates), null);
-});
-
-test('ipowatch.parseDetails extracts timeline, lot size, and min investment', () => {
-  const html = `
-    <table>
-      <tr><td>IPO Open Date:</td><td>September 10, 2026</td></tr>
-      <tr><td>IPO Close Date:</td><td>September 15, 2026</td></tr>
-      <tr><td>Face Value:</td><td>₹10 Per Equity Share</td></tr>
-      <tr><td>Issue Size:</td><td>Approx ₹210 Crores</td></tr>
-      <tr><td>Issue Type:</td><td>Book Building Issue</td></tr>
-      <tr><td>IPO Listing:</td><td>BSE, NSE</td></tr>
-      <tr><td>Basis of Allotment:</td><td>September 16, 2026</td></tr>
-      <tr><td>Refunds:</td><td>September 17, 2026</td></tr>
-      <tr><td>IPO Listing Date:</td><td>September 18, 2026</td></tr>
-    </table>
-    <table>
-      <tr><td>Application</td><td>Lot Size</td><td>Shares</td><td>Amount</td></tr>
-      <tr><td>Retail Minimum</td><td>1</td><td>107</td><td>₹14,980</td></tr>
-    </table>`;
-  const d = parseDetails(html);
-  assert.equal(d.faceValue, '₹10 Per Equity Share');
-  assert.equal(d.issueSize, 'Approx ₹210 Crores');
-  assert.equal(d.listingExchanges, 'BSE, NSE');
-  assert.equal(d.allotmentDate, '2026-09-16');
-  assert.equal(d.refundDate, '2026-09-17');
-  assert.equal(d.listingDate, '2026-09-18');
-  assert.equal(d.lotSize, 107);
-  assert.equal(d.minInvestment, 14980);
-});
-
-test('nse helpers parse dates, categories, and the subscription payload', () => {
-  assert.equal(nseDate('01-Sep-2026'), '2026-09-01');
-  assert.equal(nseDate('garbage'), null);
-  assert.equal(normalizeCategory('Qualified Institutional Buyers(QIBs)'), 'QIB');
-  assert.equal(normalizeCategory('Non Institutional Investors'), 'NII');
-  assert.equal(normalizeCategory('Retail Individual Investors(RIIs)'), 'Retail');
-  // Granular sub-rows are dropped.
-  assert.equal(normalizeCategory('Mutual funds'), null);
-  assert.equal(normalizeCategory('Cut Off'), null);
-
-  const payload = {
-    updateTime: 'Updated as on 03-Sep-2026 19:00:00',
-    dataList: [
-      { category: 'Category', noOfSharesBid: 'No. of shares bid for' },
-      { category: 'Qualified Institutional Buyers(QIBs)', noOfShareOffered: '100', noOfSharesBid: '3700', noOfTotalMeant: '37.00497' },
-      { category: 'Mutual funds', noOfTotalMeant: '0.0' },
-      { category: 'Total', noOfShareOffered: '200', noOfSharesBid: '8500', noOfTotalMeant: '42.608' },
-    ],
-  };
-  const { rows, updateTime } = parseSubscription(payload);
-  assert.equal(rows.length, 2, 'only QIB + Total survive; header and sub-row dropped');
-  assert.equal(rows[0].category, 'QIB');
-  assert.equal(rows[0].timesSubscribed, 37); // rounded to 2 dp
-  assert.equal(rows[1].category, 'Total');
-  assert.equal(rows[1].timesSubscribed, 42.61);
-  assert.equal(updateTime, 'Updated as on 03-Sep-2026 19:00:00');
 });
 
 test('x-forwarded-for is only believed from the frontend proxy', async (t) => {
@@ -857,12 +479,11 @@ test('calendar and gmp endpoints validate filters and carry attribution', async 
   assert.equal((await get('/gmp?ipo=definitely-not-listed')).status, 404);
 });
 
-test('unified ipo detail and subscription endpoints behave for unknown slugs', async () => {
+test('unified ipo detail endpoint behaves for unknown slugs', async () => {
   const unknown = await get('/ipo/definitely-not-an-ipo');
   assert.equal(unknown.status, 404);
   assert.equal(unknown.body.error.code, 'IPO_NOT_FOUND');
 
-  assert.equal((await get('/subscription?ipo=definitely-not-an-ipo')).status, 404);
   // Bad slug shape is a 400 before any lookup.
   assert.equal((await get('/ipo/Bad_Slug!')).status, 400);
 });
@@ -881,4 +502,79 @@ test('live: second call is served from cache', { skip: !LIVE || !REAL_PAN }, asy
   const second = await postAllotment({ ipo: REAL_IPO, pan: REAL_PAN });
   assert.equal(second.body.meta.cached, true);
   assert.equal(second.body.meta.checkedAt, first.body.meta.checkedAt);
+});
+
+test('investorgain percentage is taken as printed, never re-rounded', () => {
+  const html = `<table>${igRow({ name: 'Roopa Screen', path: '/gmp/roopa-screen-ipo/1/', badges: ['BSE SME'], gmp: '42', pct: '65.62', price: '64', size: '19.20', lot: '2,000', open: '24-Sep', close: '28-Sep', boa: '29-Sep', listing: '1-Oct' })}</table>`;
+  const [row] = parseInvestorGain(html, { ref: IG_REF });
+  // 42 / 64 = 65.625; toFixed(2) would print 65.63 against the source's 65.62.
+  assert.equal(row.estGainPct, 65.62);
+  assert.equal(row.estListingPrice, 106);
+});
+
+test('investorgain gives no percentage when no price is announced', () => {
+  const html = `<table>${igRow({ name: 'Jio Platforms', path: '/gmp/jio-ipo/9/', badges: ['IPO', 'U'], gmp: '177', pct: '0.00', price: '', size: '0', lot: '', open: '', close: '', boa: '', listing: '' })}</table>`;
+  const [row] = parseInvestorGain(html, { ref: IG_REF });
+  assert.equal(row.gmp, 177);
+  assert.equal(row.estGainPct, null, 'a printed 0.00% with no price is not a zero gain');
+  assert.equal(row.estListingPrice, null);
+});
+
+test('bigshare lookup: not found, one application, several, and throttling', () => {
+  // Shapes recorded from Bigshare's FetchIpodetails reply.
+  const notFound = { d: { Status: 'NOTFOUND', Message: 'No data found', DPID: 'No data found', Records: [], MatchCount: 0 } };
+  assert.deepEqual(bigshareInterpret({ status: 200, body: notFound }), { found: false, records: [] });
+
+  const one = { d: { Status: 'OK', APPLICATION_NO: '1234567', DPID: 'IN30000011112222', Name: 'A KUMAR', APPLIED: '2,000', ALLOTED: '2,000', Records: [], MatchCount: 1 } };
+  const r1 = bigshareInterpret({ status: 200, body: one });
+  assert.equal(r1.found, true);
+  const [app] = normalizeBigshare(r1.records);
+  assert.equal(app.sharesApplied, 2000, 'Indian digit grouping is parsed');
+  assert.equal(app.sharesAllotted, 2000);
+  assert.equal(app.status, 'allotted');
+  assert.equal(app.applicantName, 'A KUMAR');
+
+  const many = {
+    d: {
+      Status: 'OK', Name: 'A KUMAR', APPLICATION_NO: '1', APPLIED: '2000', ALLOTED: '0', MatchCount: 2,
+      Records: [
+        { Name: 'A KUMAR', APPLICATION_NO: '1', APPLIED: '2000', ALLOTED: '0' },
+        { Name: 'A KUMAR', APPLICATION_NO: '2', APPLIED: '2000', ALLOTED: '2000' },
+      ],
+    },
+  };
+  const apps = normalizeBigshare(bigshareInterpret({ status: 200, body: many }).records);
+  assert.deepEqual(apps.map((a) => a.status), ['not_allotted', 'allotted']);
+
+  for (const s of ['RATELIMIT', 'WARMING']) {
+    assert.throws(() => bigshareInterpret({ status: 200, body: { d: { Status: s, Message: 'wait' } } }), (e) => e.code === 'UPSTREAM_RATE_LIMITED');
+  }
+  assert.throws(() => bigshareInterpret({ status: 429, body: null }), (e) => e.code === 'UPSTREAM_RATE_LIMITED');
+  assert.throws(() => bigshareInterpret({ status: 500, body: null }), (e) => e.code === 'UPSTREAM_ERROR');
+});
+
+test('maashitla lookup: directory, not found, and an allotment', () => {
+  const companies = parseMaashitla({
+    companies: [
+      { company_name: 'TNA SOLUTIONS LIMITED', company_slug: 'tna-solutions-limited' },
+      { company_name: '  SJP  ULTRASONICS LIMITED ', company_slug: 'sjp-ultrasonics-limited' },
+      { company_name: '', company_slug: 'broken' },
+    ],
+  });
+  assert.deepEqual(companies, [
+    { id: 'tna-solutions-limited', name: 'TNA SOLUTIONS LIMITED' },
+    { id: 'sjp-ultrasonics-limited', name: 'SJP ULTRASONICS LIMITED' },
+  ]);
+
+  // The site's own reading: an empty object, or a 404, is "no record".
+  assert.deepEqual(maashitlaInterpret({ status: 200, body: {} }), { found: false, records: [] });
+  assert.deepEqual(maashitlaInterpret({ status: 404, body: null }), { found: false, records: [] });
+
+  const hit = maashitlaInterpret({ status: 200, body: { name: 'B SHARMA', shares_applied: '2000', shares_allotted: '0' } });
+  assert.equal(hit.found, true);
+  const [app] = normalizeMaashitla(hit.records);
+  assert.equal(app.status, 'not_allotted');
+  assert.equal(app.sharesApplied, 2000);
+
+  assert.throws(() => maashitlaInterpret({ status: 500, body: null }), (e) => e.code === 'UPSTREAM_ERROR');
 });
