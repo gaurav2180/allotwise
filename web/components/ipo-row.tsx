@@ -344,7 +344,6 @@ function ExpandedBody({
         </p>
       );
     }
-    const name = (reg.name ?? "the registrar").replace(/\s*(pvt\.?\s*ltd\.?|private limited|limited|ltd\.?)\s*$/i, "");
     const today = new Date().toISOString().slice(0, 10);
     const due = ipo.allotmentDate && ipo.allotmentDate > today ? ipo.allotmentDate : null;
     return (
@@ -364,15 +363,11 @@ function ExpandedBody({
               </span>
               Check allotment
             </h3>
-            <p className="mt-1.5 text-[12px] text-dim">
-              {due
-                ? `Allotment is expected ${formatDate(due)}. ${name} publishes it on its own site.`
-                : `${name} handles this IPO. Check each PAN on its official status page.`}
-            </p>
+            {due && <p className="mt-1.5 text-[12px] text-dim">Allotment expected {formatDate(due)}</p>}
           </div>
           <a
             href={reg.url}
-            aria-label={`Check PAN on ${name}'s site (opens in a new tab)`}
+            aria-label="Check PAN (opens the registrar's site in a new tab)"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border px-3 text-[12px] font-medium"
