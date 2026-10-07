@@ -22,7 +22,11 @@ export function SiteHeader() {
   return (
     <header className="border-b border-border">
       <div className="mx-auto flex max-w-5xl items-center gap-4 px-4 py-3 sm:px-6">
-        <Link href="/app" className="-my-1 flex min-h-11 items-center gap-2 rounded-control py-1 sm:min-h-0 sm:py-0">
+        <Link
+          href="/"
+          aria-label="Allotwise home"
+          className="-my-1 flex min-h-11 items-center gap-2 rounded-control py-1 sm:min-h-0 sm:py-0"
+        >
           <LogoLockup />
         </Link>
 
