@@ -14,6 +14,7 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { PanResult } from "@/components/pan-result";
+import { QuickCheck } from "@/components/quick-check";
 import { IpoLogo } from "@/components/ipo-logo";
 import { IpoDetailPanel } from "@/components/ipo-detail";
 import { useAllotmentCheck } from "@/hooks/use-allotment-check";
@@ -429,27 +430,7 @@ function ExpandedBody({
     return <div className="aw-skeleton mt-3 h-9 w-48 rounded-control" />;
   }
 
-  if (pans.length === 0) {
-    return (
-      <div className="pt-3">
-        <p className="text-[13px] text-dim">
-          Save a PAN to check this IPO. PANs stay in this browser — they are sent to the registrar
-          only for the seconds a check takes, and never stored on our servers.
-        </p>
-        <Link
-          href="/pans"
-          className="mt-3 inline-flex h-8 items-center rounded-control border px-3 text-[12px] font-medium"
-          style={{
-            background: "var(--btn-bg)",
-            color: "var(--btn-text)",
-            borderColor: "var(--btn-border)",
-          }}
-        >
-          Add a PAN
-        </Link>
-      </div>
-    );
-  }
+  if (pans.length === 0) return <QuickCheck check={check} />;
 
   return (
     <div
