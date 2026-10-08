@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CaretLeftIcon, InfoIcon } from "@phosphor-icons/react";
 import { IpoLogo } from "@/components/ipo-logo";
 import { GmpChart } from "@/components/gmp-chart";
+import { GmpExplainer } from "@/components/gmp-explainer";
 import { useIpos } from "@/hooks/use-ipos";
 import { FROM_LIST_KEY, gmpHistoryQuery } from "@/hooks/use-gmp-history";
 import type { IpoListItem } from "@/lib/schemas";
@@ -227,11 +228,12 @@ export function GmpPage() {
           )}
 
           <SectionTitle>What is GMP?</SectionTitle>
-          <p className="mt-2 text-[14px] leading-relaxed text-dim">
-            Grey Market Premium (GMP) is the premium at which IPO shares trade unofficially before
-            they list on the stock exchange. It reflects demand and gives an expected listing price:
-            issue price plus GMP. Estimated profit per lot is lot size times GMP.
-          </p>
+          <GmpExplainer
+            issuePrice={listing?.issuePrice ?? issuePrice}
+            gmp={gmp}
+            lotSize={ipo?.lotSize ?? null}
+            listing={listing}
+          />
 
           <div className="mt-5 flex gap-2 border-t border-border pt-4 text-[13px] text-dim">
             <InfoIcon size={16} className="mt-0.5 shrink-0" aria-hidden />
