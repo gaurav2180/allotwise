@@ -19,7 +19,7 @@ import {
   TrendUpIcon,
 } from "@phosphor-icons/react";
 import type { IpoListItem } from "@/lib/schemas";
-import { estProfitPerLot, formatIssueSize, formatLongDate, formatPriceBand, inr } from "@/lib/utils";
+import { estProfitPerLot, formatIssueSize, listingGainPerLot, formatLongDate, formatPriceBand, inr } from "@/lib/utils";
 
 type Icon = React.ComponentType<{ size?: number; weight?: "regular"; className?: string }>;
 
@@ -71,7 +71,9 @@ const signColor = (n: number | null) =>
  * dates. Everything is on the row already, so nothing is fetched here.
  */
 export function IpoDetailPanel({ ipo }: { ipo: IpoListItem }) {
-  const profit = estProfitPerLot(ipo.lotSize, ipo.gmp);
+  // Once listed, what a lot really made replaces what the premium forecast.
+  const listed = Boolean(ipo.listing);
+  const profit = listed ? listingGainPerLot(ipo.lotSize, ipo.listing) : estProfitPerLot(ipo.lotSize, ipo.gmp);
   const router = useRouter();
 
   // Opening a row is the signal someone may open the GMP page next, so both
@@ -116,8 +118,8 @@ export function IpoDetailPanel({ ipo }: { ipo: IpoListItem }) {
         <Fact icon={MoneyIcon} label="Price Range" value={formatPriceBand(ipo.priceBand)} />
         <Fact
           icon={TrendUpIcon}
-          label="Est. Profit / Lot"
-          value={profit !== null ? `₹${inr(profit)}` : null}
+          label={listed ? "Listing Gain / Lot" : "Est. Profit / Lot"}
+          value={profit !== null ? `${profit < 0 ? "−" : ""}₹${inr(Math.abs(profit))}` : null}
           color={signColor(profit)}
         />
         <Fact icon={BankIcon} label="Issue Size" value={formatIssueSize(ipo.issueSize)} />
@@ -128,7 +130,9 @@ export function IpoDetailPanel({ ipo }: { ipo: IpoListItem }) {
       </div>
 
       <p className="mt-2 text-[11px] text-dim">
-        Est. profit is lot size × GMP. GMP is unofficial and moves daily.{" "}
+        {listed
+          ? "Listing gain is lot size × (listing price − issue price), before any later move in the share price."
+          : "Est. profit is lot size × GMP. GMP is unofficial and moves daily."}{" "}
         <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
           Disclaimer
         </Link>

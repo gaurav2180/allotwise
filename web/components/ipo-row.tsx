@@ -9,6 +9,7 @@ import {
   ClockIcon,
   SealCheckIcon,
   CurrencyInrIcon,
+  TagIcon,
   TrendUpIcon,
   UsersIcon,
 } from "@phosphor-icons/react";
@@ -40,12 +41,12 @@ import {
  * Within a week a countdown reads faster than a date.
  */
 function stateLine(ipo: IpoListItem): string {
-  // A listed issue has an outcome, which outranks anything still pending.
-  if (ipo.listing) return "Listed";
-  if (ipo.listedOn) {
-    // It has listed, but the debut price is not published yet. Say both.
-    const rel = relativeDay(ipo.listedOn);
-    return rel === "today" ? "Listed today" : `Listed ${formatDate(ipo.listedOn)}`;
+  // A listed issue has an outcome, which outranks anything still pending. The
+  // price it listed at has its own cell; this line says when.
+  if (ipo.listing || ipo.listedOn) {
+    const on = ipo.listedOn ?? ipo.listingDate;
+    if (!on) return "Listed";
+    return relativeDay(on) === "today" ? "Listed today" : `Listed ${formatDate(on)}`;
   }
   if (ipo.allotment.available || allotmentOut(ipo)) return "Allotment out";
 
@@ -84,7 +85,8 @@ function listedColor(gainPct: number): string {
 /** Desktop column widths, shared with IpoListHeader so figures line up. */
 const COL = {
   price: "sm:w-24",
-  gmp: "sm:w-28",
+  // Wide enough for "₹1,455 (+75.37%)", the longest listed figure.
+  gmp: "sm:w-32",
   subs: "sm:w-16",
 };
 
@@ -146,7 +148,9 @@ export function IpoListHeader() {
       <div className="min-w-0 flex-1" />
       <div className="flex shrink-0 items-center gap-4">
         <HeaderCell label="Issue price" icon={CurrencyInrIcon} className={COL.price} />
-        <HeaderCell label="GMP" icon={TrendUpIcon} className={COL.gmp} />
+        {/* An issue that has listed shows the price it listed at here instead
+            of a premium that has been superseded, so the label covers both. */}
+        <HeaderCell label="GMP / Listed" icon={TrendUpIcon} className={COL.gmp} />
         <HeaderCell label="Subs" icon={UsersIcon} className={COL.subs} />
       </div>
       <span className="w-4 shrink-0" />
@@ -225,6 +229,8 @@ export function IpoRow({
   // price announced) still reads as positive or negative.
   const gain = ipo.estGainPct ?? ipo.gmp ?? 0;
   const gainColor = gain > 0 ? "var(--positive)" : gain < 0 ? "var(--negative)" : "var(--dim)";
+  // Listed either way: with a published debut price, or by date alone.
+  const hasListed = Boolean(ipo.listing || ipo.listedOn);
   // The full band when the detail scrape has reached this IPO, else the
   // calendar's cap price. Both go through the same formatter, so a fixed-price
   // issue and a two-ended band render consistently.
@@ -248,16 +254,6 @@ export function IpoRow({
             <div className="truncate text-[14px] font-medium">{ipo.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-dim">
               <span>{stateLine(ipo)}</span>
-              {/* The debut price is the one fact that only some rows have, so it
-                  lives here rather than displacing a column. */}
-              {ipo.listing && (
-                <>
-                  <span aria-hidden>·</span>
-                  <span className="num" style={{ color: listedColor(ipo.listing.gainPct) }}>
-                    ₹{inr(ipo.listing.price)} ({signedPct(ipo.listing.gainPct)})
-                  </span>
-                </>
-              )}
               <span aria-hidden>·</span>
               <span className="shrink-0">{ipo.board === "sme" ? "SME" : "Mainboard"}</span>
             </div>
@@ -278,20 +274,35 @@ export function IpoRow({
             {ipo.listing ? `₹${inr(ipo.listing.issuePrice)}` : (issuePrice ?? "—")}
           </Stat>
 
-          {/* One reading for every row, listed or not: the premium and its
-              percentage exactly as the source prints them. */}
-          <Stat label="GMP" icon={TrendUpIcon} className={COL.gmp}>
-            {ipo.gmp === null ? (
-              "—"
-            ) : (
-              <span style={{ color: gainColor }}>
-                ₹{inr(ipo.gmp)}
-                {ipo.estGainPct !== null && (
-                  <span className="text-[11px]"> ({signedPct(ipo.estGainPct)})</span>
-                )}
-              </span>
-            )}
-          </Stat>
+          {/* Before listing: the premium, as the source prints it. Once listed,
+              the premium was only a forecast, so the cell reports what really
+              happened: the price it listed at and the move from the issue
+              price, green for a gain and red for a loss. */}
+          {hasListed ? (
+            <Stat label="Listed at" icon={TagIcon} className={COL.gmp}>
+              {ipo.listing ? (
+                <span style={{ color: listedColor(ipo.listing.gainPct) }}>
+                  ₹{inr(ipo.listing.price)}
+                  <span className="text-[11px]"> ({signedPct(ipo.listing.gainPct)})</span>
+                </span>
+              ) : (
+                <span className="text-dim">—</span>
+              )}
+            </Stat>
+          ) : (
+            <Stat label="GMP" icon={TrendUpIcon} className={COL.gmp}>
+              {ipo.gmp === null ? (
+                "—"
+              ) : (
+                <span style={{ color: gainColor }}>
+                  ₹{inr(ipo.gmp)}
+                  {ipo.estGainPct !== null && (
+                    <span className="text-[11px]"> ({signedPct(ipo.estGainPct)})</span>
+                  )}
+                </span>
+              )}
+            </Stat>
+          )}
 
           <Stat label="Subs" icon={UsersIcon} className={COL.subs}>
             {ipo.subscription?.overall != null ? times(ipo.subscription.overall) : "—"}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capPrice, estProfitPerLot, formatIssueSize, formatPriceBand } from "@/lib/utils";
+import { capPrice, estProfitPerLot, formatIssueSize, formatPriceBand, listingGainPerLot } from "@/lib/utils";
 
 describe("estProfitPerLot", () => {
   it("is lot size times the premium, as InvestorGain and IPOwiz print it", () => {
@@ -64,5 +64,19 @@ describe("listing outcome supersedes the forecast", () => {
     // Against the floor this would read +9.4%, which is not what an applicant
     // paid: allocations are made at the cap.
     expect(gain(140, "₹87-92")).toBe(52.17);
+  });
+});
+
+describe("listingGainPerLot", () => {
+  it("is the lot times the move from issue price to listing price", () => {
+    // A-One Steels: 37-share lot, ₹405 issue, listed at ₹455.
+    expect(listingGainPerLot(37, { price: 455, issuePrice: 405 })).toBe(1850);
+    // Peshwa Wheat: 1,200-share lot, ₹101 issue, listed at ₹100.05 -- a loss.
+    expect(listingGainPerLot(1200, { price: 100.05, issuePrice: 101 })).toBe(-1140);
+  });
+
+  it("shows nothing without a lot size or a listing price", () => {
+    expect(listingGainPerLot(null, { price: 455, issuePrice: 405 })).toBeNull();
+    expect(listingGainPerLot(37, null)).toBeNull();
   });
 });

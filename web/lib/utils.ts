@@ -55,6 +55,19 @@ export function estProfitPerLot(lotSize: number | null | undefined, gmp: number 
   return Math.round(lotSize * gmp * 100) / 100;
 }
 
+/**
+ * What one lot actually gained (or lost) on listing: lot size times the move
+ * from the issue price to the price it listed at. The realised counterpart of
+ * `estProfitPerLot`, which is only a forecast until the issue lists.
+ */
+export function listingGainPerLot(
+  lotSize: number | null | undefined,
+  listing: { price: number; issuePrice: number } | null | undefined
+): number | null {
+  if (!lotSize || lotSize <= 0 || !listing) return null;
+  return Math.round(lotSize * (listing.price - listing.issuePrice) * 100) / 100;
+}
+
 export function formatPriceBand(band: string | null | undefined): string | null {
   if (!band) return null;
   const nums = [...band.matchAll(/([\d,]+(?:\.\d+)?)/g)].map((m) => Number(m[1].replace(/,/g, "")));

@@ -78,7 +78,7 @@ export function QuickCheck({ check }: { check: ReturnType<typeof useAllotmentChe
               setValue(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""));
               if (error) setError(null);
             }}
-            placeholder="Enter PAN, e.g. ABCDE1234F"
+            placeholder="Enter your PAN"
             maxLength={10}
             autoCapitalize="characters"
             autoComplete="off"
@@ -87,14 +87,17 @@ export function QuickCheck({ check }: { check: ReturnType<typeof useAllotmentChe
             inputMode="text"
             invalid={Boolean(error)}
             aria-describedby={error ? errorId : undefined}
-            className="num h-8 px-2.5 tracking-wide sm:h-8"
+            // The typed text stays 16px on a phone (smaller makes iOS zoom the
+            // page on focus); only the placeholder, which does not trigger it,
+            // is set smaller so the row stays compact.
+            className="num h-8 px-2.5 tracking-wide placeholder:text-[13px] placeholder:tracking-normal sm:h-8"
           />
         </div>
         <Button
           type="submit"
           variant="primary"
           size="sm"
-          className="h-8 px-3 text-[12px] sm:h-8 sm:px-3"
+          className="h-8 px-2.5 text-[12px] whitespace-nowrap sm:h-8 sm:px-3"
           disabled={check.isRunning}
         >
           {check.isRunning && <ArrowClockwiseIcon size={14} weight="bold" className="animate-spin" aria-hidden />}

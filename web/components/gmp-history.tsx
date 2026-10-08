@@ -9,7 +9,7 @@ import { GmpChart } from "@/components/gmp-chart";
 import { useIpos } from "@/hooks/use-ipos";
 import { FROM_LIST_KEY, gmpHistoryQuery } from "@/hooks/use-gmp-history";
 import type { IpoListItem } from "@/lib/schemas";
-import { capPrice, derivePhase, estProfitPerLot, formatLongDate, inr } from "@/lib/utils";
+import { capPrice, derivePhase, estProfitPerLot, formatLongDate, inr, listingGainPerLot } from "@/lib/utils";
 
 const signColor = (n: number | null | undefined) =>
   n === null || n === undefined || n === 0 ? undefined : n > 0 ? "var(--positive)" : "var(--negative)";
@@ -95,6 +95,12 @@ export function GmpPage() {
   const profit = estProfitPerLot(ipo?.lotSize, gmp);
   const expected = gmp !== null && issuePrice ? issuePrice + gmp : (latest?.indicative ?? null);
 
+  // Once an issue has listed, the real outcome replaces the forecast: the price
+  // it listed at, and what a lot gained or lost on it.
+  const listing = ipo?.listing ?? null;
+  const listingGain = listingGainPerLot(ipo?.lotSize, listing);
+  const signed = (n: number) => `${n < 0 ? "−" : ""}₹${inr(Math.abs(n))}`;
+
   const loading = Boolean(slug) && (ipos.isPending || history.isPending) && !name;
 
   return (
@@ -135,17 +141,35 @@ export function GmpPage() {
           <SectionTitle>Current Market Overview</SectionTitle>
           <div className="mt-1">
             <OverviewRow
-              label="Current GMP"
+              label={listing ? "Last GMP" : "Current GMP"}
               value={gmp === null ? "—" : gmpPct === null ? `₹${inr(gmp)}` : `₹${inr(gmp)} (${pct1(gmpPct)})`}
               color={signColor(gmp)}
             />
-            <OverviewRow
-              label="Est. Profit/Lot"
-              value={profit === null ? "—" : `₹${inr(profit)}`}
-              color={signColor(profit)}
-            />
-            <OverviewRow label="Issue Price" value={issuePrice ? `₹${inr(issuePrice)}` : "—"} />
-            <OverviewRow label="Expected Listing" value={expected !== null ? `₹${inr(expected)}` : "—"} />
+            {listing ? (
+              <>
+                <OverviewRow
+                  label="Listing Gain/Lot"
+                  value={listingGain === null ? "—" : signed(listingGain)}
+                  color={signColor(listingGain)}
+                />
+                <OverviewRow label="Issue Price" value={`₹${inr(listing.issuePrice)}`} />
+                <OverviewRow
+                  label="Listed At"
+                  value={`₹${inr(listing.price)} (${listing.gainPct > 0 ? "+" : ""}${pct1(listing.gainPct)})`}
+                  color={signColor(listing.gainPct)}
+                />
+              </>
+            ) : (
+              <>
+                <OverviewRow
+                  label="Est. Profit/Lot"
+                  value={profit === null ? "—" : `₹${inr(profit)}`}
+                  color={signColor(profit)}
+                />
+                <OverviewRow label="Issue Price" value={issuePrice ? `₹${inr(issuePrice)}` : "—"} />
+                <OverviewRow label="Expected Listing" value={expected !== null ? `₹${inr(expected)}` : "—"} />
+              </>
+            )}
           </div>
 
           {points.length >= 2 && (
