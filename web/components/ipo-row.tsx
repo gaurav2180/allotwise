@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import Link from "next/link";
 import {
   ArrowClockwiseIcon,
   ArrowSquareOutIcon,
   CaretDownIcon,
-  ClockIcon,
   SealCheckIcon,
   CurrencyInrIcon,
   TagIcon,
@@ -16,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { PanResult } from "@/components/pan-result";
 import { QuickCheck } from "@/components/quick-check";
+import { AwaitingAllotment } from "@/components/awaiting-allotment";
 import { IpoLogo } from "@/components/ipo-logo";
 import { IpoDetailPanel } from "@/components/ipo-detail";
 import { useAllotmentCheck } from "@/hooks/use-allotment-check";
@@ -24,9 +23,9 @@ import type { IpoListItem } from "@/lib/schemas";
 import type { PanEntry } from "@/lib/pan";
 import {
   allotmentOut,
+  allotmentPublished,
   cn,
   derivePhase,
-  describeAllotmentDate,
   formatDate,
   formatPriceBand,
   inr,
@@ -48,7 +47,10 @@ function stateLine(ipo: IpoListItem): string {
     if (!on) return "Listed";
     return relativeDay(on) === "today" ? "Listed today" : `Listed ${formatDate(on)}`;
   }
-  if (ipo.allotment.available || allotmentOut(ipo)) return "Allotment out";
+  if (allotmentPublished(ipo)) return "Allotment out";
+  // The date has come but the registrar has not published yet: it sits in
+  // Awaiting, and the line says why.
+  if (allotmentOut(ipo)) return "Allotment due today";
 
   // Derived from dates, not the scraped status, which goes stale overnight.
   // "Today" carries no date alongside it — it would just repeat the date the
@@ -344,7 +346,9 @@ function ExpandedBody({
   panStoreReady: boolean;
   check: ReturnType<typeof useAllotmentCheck>;
 }) {
-  const [notice, setNotice] = useState(false);
+  // Still awaited, wherever it will be checked: a button now could only fail,
+  // so the row shows where the issue stands and opens the check once it can.
+  if (!allotmentPublished(ipo)) return <AwaitingAllotment ipo={ipo} />;
 
   // Not every IPO can be checked in-app — only issues in a registrar we query,
   // once that registrar lists them. For the rest, the registrar's official
@@ -360,79 +364,34 @@ function ExpandedBody({
         </p>
       );
     }
-    // Before the allotment date the registrar's page has nothing to show, so
-    // the button says so here instead of sending someone away to find out.
-    const notOut = !allotmentOut(ipo);
-    const due = notOut && ipo.allotmentDate ? ipo.allotmentDate : null;
-    const buttonClass =
-      "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border px-3 text-[12px] font-medium";
-    const buttonStyle = { background: "var(--btn-bg)", color: "var(--btn-text)", borderColor: "var(--btn-border)" };
     return (
       <div
         className="mt-3 rounded-card border border-border p-3"
         style={{ background: "radial-gradient(140% 100% at 100% 0%, var(--accent-soft), var(--surface) 55%)" }}
       >
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="flex items-center gap-2 text-[14px] font-medium">
-              <span
-                className="grid size-6 shrink-0 place-items-center rounded-control"
-                style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                aria-hidden
-              >
-                <SealCheckIcon size={14} weight="bold" />
-              </span>
-              Check allotment
-            </h3>
-            {due && !notice && <p className="mt-1.5 text-[12px] text-dim">Allotment expected {formatDate(due)}</p>}
-          </div>
-          {notOut ? (
-            <button
-              type="button"
-              aria-expanded={notice}
-              onClick={() => setNotice((v) => !v)}
-              className={buttonClass}
-              style={buttonStyle}
-            >
-              Check PAN
-            </button>
-          ) : (
-            <a
-              href={reg.url}
-              aria-label="Check PAN (opens the registrar's site in a new tab)"
-              target="_blank"
-              rel="noopener noreferrer"
-              className={buttonClass}
-              style={buttonStyle}
-            >
-              Check PAN
-              <ArrowSquareOutIcon size={12} weight="bold" aria-hidden />
-            </a>
-          )}
-        </div>
-
-        {notOut && notice && (
-          <div
-            role="status"
-            className="aw-page-fade-in mt-3 flex items-start gap-3 rounded-control border border-border bg-surface p-3"
-          >
+          <h3 className="flex min-w-0 items-center gap-2 text-[14px] font-medium">
             <span
-              className="grid size-7 shrink-0 place-items-center rounded-control"
+              className="grid size-6 shrink-0 place-items-center rounded-control"
               style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
               aria-hidden
             >
-              <ClockIcon size={15} weight="bold" />
+              <SealCheckIcon size={14} weight="bold" />
             </span>
-            <div className="min-w-0">
-              <div className="text-[13px] font-medium">Allotment isn&rsquo;t out yet</div>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
-                {ipo.allotmentDate
-                  ? `It is expected ${describeAllotmentDate(ipo.allotmentDate)}. Results are published that day, so check back then.`
-                  : "The date hasn’t been announced yet. It will show here once the issue’s dates are out."}
-              </p>
-            </div>
-          </div>
-        )}
+            Check allotment
+          </h3>
+          <a
+            href={reg.url}
+            aria-label="Check PAN (opens the registrar's site in a new tab)"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-control border px-3 text-[12px] font-medium"
+            style={{ background: "var(--btn-bg)", color: "var(--btn-text)", borderColor: "var(--btn-border)" }}
+          >
+            Check PAN
+            <ArrowSquareOutIcon size={12} weight="bold" aria-hidden />
+          </a>
+        </div>
       </div>
     );
   }

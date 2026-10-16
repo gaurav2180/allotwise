@@ -365,6 +365,29 @@
     animation: aw-page-fade-in var(--dur-page-nav) var(--ease-slide) both;
   }
 
+  /* The IPO list after a swipe between tabs: it arrives from the side the
+     finger pulled it from -- swiped left, the next tab comes in from the
+     right. A short travel, so it reads as following the finger, not a page
+     flying in. */
+  @keyframes aw-swipe-from-right {
+    from {
+      transform: translateX(28px);
+      opacity: 0.3;
+    }
+  }
+  @keyframes aw-swipe-from-left {
+    from {
+      transform: translateX(-28px);
+      opacity: 0.3;
+    }
+  }
+  .aw-swipe-left {
+    animation: aw-swipe-from-right 240ms var(--ease-slide) both;
+  }
+  .aw-swipe-right {
+    animation: aw-swipe-from-left 240ms var(--ease-slide) both;
+  }
+
   .aw-skeleton {
     background-color: var(--skeleton-base);
     animation: aw-skeleton-pulse var(--dur-skeleton-pulse) ease-in-out infinite;

@@ -139,6 +139,22 @@ export function allotmentOut(ipo: { allotmentDate?: string | null }, now = new D
 }
 
 /**
+ * Whether an issue belongs with the published results rather than the ones
+ * still awaited. Stricter than `allotmentOut` on the day itself: registrars
+ * publish some time on the allotment date, often in the evening, so until the
+ * registrar actually has it (`allotment.available`) an issue due today is
+ * still awaited. A date already past counts as out even when the registrar is
+ * one only reachable by link, so nothing waits forever on a check we can't make.
+ */
+export function allotmentPublished(
+  ipo: { allotmentDate?: string | null; allotment: { available: boolean }; listedOn?: string | null; listing?: unknown },
+  now = new Date()
+): boolean {
+  if (ipo.allotment.available || ipo.listedOn || ipo.listing) return true;
+  return Boolean(ipo.allotmentDate && ipo.allotmentDate < localDate(now));
+}
+
+/**
  * The reader's own calendar date, as YYYY-MM-DD. Not `toISOString`, which is
  * UTC: for anyone in India that is still yesterday until 5:30 in the morning,
  * so an allotment due today would have read as "tomorrow" overnight.
@@ -176,7 +192,9 @@ export function derivePhase(
   ipo: { openDate?: string | null; closeDate?: string | null; status?: string },
   now = new Date()
 ): Phase {
-  const today = now.toISOString().slice(0, 10);
+  // The reader's date, like allotmentOut: UTC would keep an issue that closed
+  // yesterday "open" until 5:30 in the morning in India.
+  const today = localDate(now);
   if (ipo.closeDate && ipo.closeDate < today) return "closed";
   if (ipo.openDate && ipo.openDate > today) return "upcoming";
   if (ipo.openDate && ipo.openDate <= today) return "open";
@@ -191,7 +209,9 @@ export function daysUntil(iso: string | null | undefined, now = new Date()): num
   if (!iso) return null;
   const target = Date.parse(`${iso}T00:00:00Z`);
   if (Number.isNaN(target)) return null;
-  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  // The reader's calendar day, as everywhere else: in UTC "today" would still
+  // be yesterday until 5:30 in the morning in India.
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   return Math.round((target - today) / 86_400_000);
 }
 

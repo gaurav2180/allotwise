@@ -70,5 +70,8 @@ export function useIpos() {
     if (saved) queryClient.setQueryData(QUERY_KEY, saved.data, { updatedAt: saved.at });
   }, [queryClient]);
 
-  return useQuery({ queryKey: QUERY_KEY, queryFn: fetchIpos });
+  // Re-read every minute while the page is visible, so a registrar publishing
+  // an allotment moves its IPO to Allotted without a reload. React Query pauses
+  // the interval in a background tab and refetches on return to it.
+  return useQuery({ queryKey: QUERY_KEY, queryFn: fetchIpos, refetchInterval: 60_000 });
 }

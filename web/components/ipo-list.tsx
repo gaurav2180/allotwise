@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { FilterTabs, type TabOption } from "@/components/filter-tabs";
 import { Select } from "@/components/ui/select";
@@ -16,7 +16,9 @@ import { usePans } from "@/hooks/use-pans";
 import { useIpoSearch } from "@/hooks/use-ipo-search";
 import { useIpos } from "@/hooks/use-ipos";
 import type { IpoListItem } from "@/lib/schemas";
-import { allotmentOut, derivePhase } from "@/lib/utils";
+import { allotmentPublished, derivePhase } from "@/lib/utils";
+import { useToday } from "@/hooks/use-today";
+import { useSwipe, type SwipeDirection } from "@/hooks/use-swipe";
 
 type Filter = "ongoing" | "awaiting" | "upcoming" | "allotted";
 type BoardFilter = "all" | "mainboard" | "sme";
@@ -29,11 +31,11 @@ type BoardFilter = "all" | "mainboard" | "sme";
  * "Awaiting" is the gap between the issue closing and its allotment coming
  * out: too late to apply, too early to check.
  */
-function bucketOf(ipo: IpoListItem): Filter {
-  if (ipo.allotment.available || ipo.listedOn || ipo.listing || allotmentOut(ipo)) return "allotted";
+export function bucketOf(ipo: IpoListItem, now = new Date()): Filter {
+  if (allotmentPublished(ipo, now)) return "allotted";
   // Dates over scraped status: an issue that opened overnight is no longer
   // upcoming, whatever the last sync recorded.
-  const phase = derivePhase(ipo);
+  const phase = derivePhase(ipo, now);
   return phase === "upcoming" ? "upcoming" : phase === "open" ? "ongoing" : "awaiting";
 }
 
@@ -80,7 +82,7 @@ export function compareOngoing(a: IpoListItem, b: IpoListItem, now = new Date())
  * Allotment soonest first: that is the date the reader is waiting on. An issue
  * with no allotment date sits after the dated ones, latest closed first.
  */
-export function compareAwaiting(a: IpoListItem, b: IpoListItem, _now = new Date()): number {
+export function compareAwaiting(a: IpoListItem, b: IpoListItem): number {
   return (
     (a.allotmentDate ?? FAR_FUTURE).localeCompare(b.allotmentDate ?? FAR_FUTURE) ||
     (b.closeDate ?? LONG_PAST).localeCompare(a.closeDate ?? LONG_PAST) ||
@@ -89,14 +91,14 @@ export function compareAwaiting(a: IpoListItem, b: IpoListItem, _now = new Date(
 }
 
 /** Opening soonest first; an issue with no date announced sits at the end. */
-export function compareUpcoming(a: IpoListItem, b: IpoListItem, _now = new Date()): number {
+export function compareUpcoming(a: IpoListItem, b: IpoListItem): number {
   // A null date cannot be placed among real ones, and sorting it as "" would
   // put Jio and PhonePe above an issue opening tomorrow.
   return (a.openDate ?? FAR_FUTURE).localeCompare(b.openDate ?? FAR_FUTURE) || byName(a, b);
 }
 
 /** Allotment out but not yet listed first — there is still something to come. */
-export function compareAllotted(a: IpoListItem, b: IpoListItem, _now = new Date()): number {
+export function compareAllotted(a: IpoListItem, b: IpoListItem): number {
   const listedRank = (r: IpoListItem) => (r.listedOn || r.listing ? 1 : 0);
   const diff = listedRank(a) - listedRank(b);
   if (diff !== 0) return diff;
@@ -118,7 +120,7 @@ export function compareSearch(a: IpoListItem, b: IpoListItem, now = new Date()):
   };
   const diff = phaseRank(a) - phaseRank(b);
   if (diff !== 0) return diff;
-  return phaseRank(a) === 1 ? compareUpcoming(a, b, now) : compareOngoing(a, b, now);
+  return phaseRank(a) === 1 ? compareUpcoming(a, b) : compareOngoing(a, b, now);
 }
 
 const BOARDS: { value: BoardFilter; label: string }[] = [
@@ -163,13 +165,16 @@ export function IpoList() {
   // user's scroll happened to land. Opening the first row from a fully
   // closed list causes no such shift, so it opens exactly where it is.
   const [scrollOnOpen, setScrollOnOpen] = useState(false);
-  const chosen = useRef(remembered.chosen);
+  const [chosen, setChosen] = useState(remembered.chosen);
   const { pans, ready } = usePans();
   const { query: search, setQuery: setSearch } = useIpoSearch();
   const q = search.trim().toLowerCase();
   const isSearching = q.length > 0;
 
   const query = useIpos();
+  // Tabs are a function of the date as well as the data: an issue moves from
+  // Ongoing to Awaiting the day after it closes, with no new data at all.
+  const today = useToday();
 
   // Board narrows the set first, so the tab counts reflect what the board
   // filter is actually showing rather than the unfiltered total.
@@ -180,24 +185,26 @@ export function IpoList() {
 
   const counts = useMemo(() => {
     const c = { ongoing: 0, awaiting: 0, upcoming: 0, allotted: 0 };
-    for (const r of scoped) c[bucketOf(r)] += 1;
+    for (const r of scoped) c[bucketOf(r, today)] += 1;
     return c;
-  }, [scoped]);
+  }, [scoped, today]);
 
   // Land on a tab that actually has something. Allotted comes first and is
   // the default — checking a result is the reason most visits happen — with
   // ongoing and upcoming as fallbacks. Runs once, so the tab never moves under
-  // the user afterwards.
-  useEffect(() => {
-    if (chosen.current || !query.data) return;
-    chosen.current = true;
-    remembered.chosen = true;
+  // the user afterwards. Decided during render, the way React adjusts state to
+  // new props, so the first list paints on the right tab rather than flashing
+  // an empty one first.
+  if (!chosen && query.data) {
+    setChosen(true);
     const first = (["allotted", "awaiting", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
-    if (first && first !== "allotted") {
-      remembered.filter = first;
-      setFilterState(first);
-    }
-  }, [query.data, counts]);
+    if (first && first !== "allotted") setFilterState(first);
+  }
+  // Remembered once committed, for the next visit to the list in this tab.
+  useEffect(() => {
+    remembered.chosen = chosen;
+    remembered.filter = filter;
+  }, [chosen, filter]);
 
   const rows = useMemo(() => {
     // A search spans every status — the tabs partition by where an issue
@@ -205,14 +212,16 @@ export function IpoList() {
     // being searched for if it sits in a different tab than the current one.
     const list = isSearching
       ? scoped.filter((r) => r.name.toLowerCase().includes(q))
-      : scoped.filter((r) => bucketOf(r) === filter);
+      : scoped.filter((r) => bucketOf(r, today) === filter);
 
-    if (isSearching) return [...list].sort(compareSearch);
-    if (filter === "allotted") return [...list].sort(compareAllotted);
-    if (filter === "awaiting") return [...list].sort(compareAwaiting);
-    if (filter === "upcoming") return [...list].sort(compareUpcoming);
-    return [...list].sort(compareOngoing);
-  }, [scoped, filter, isSearching, q]);
+    const by = (cmp: (a: IpoListItem, b: IpoListItem, now: Date) => number) =>
+      [...list].sort((a, b) => cmp(a, b, today));
+    if (isSearching) return by(compareSearch);
+    if (filter === "allotted") return by(compareAllotted);
+    if (filter === "awaiting") return by(compareAwaiting);
+    if (filter === "upcoming") return by(compareUpcoming);
+    return by(compareOngoing);
+  }, [scoped, filter, isSearching, q, today]);
 
   // Memoized so its identity is stable across renders that don't actually
   // change the counts (opening a row, for one) — FilterTabs re-measures and
@@ -228,6 +237,21 @@ export function IpoList() {
     ],
     [counts]
   );
+
+  // On a phone, a sideways swipe anywhere on the page moves one tab along, in
+  // the strip's own order: left for the next, right for the previous. It stops
+  // at either end rather than wrapping, which is what a pager feels like. Off
+  // while searching, when there are no tabs to move between. The list slides
+  // in from the side it was pulled from; a counter, not the tab, keys that, so
+  // a tap on a tab switches as it always did.
+  const [swipe, setSwipe] = useState<{ n: number; dir: SwipeDirection } | null>(null);
+  useSwipe((dir) => {
+    const i = tabs.findIndex((t) => t.value === filter);
+    const next = tabs[dir === "left" ? i + 1 : i - 1];
+    if (!next) return;
+    setSwipe((s) => ({ n: (s?.n ?? 0) + 1, dir }));
+    setFilter(next.value);
+  }, !isSearching && Boolean(query.data));
 
   return (
     <div>
@@ -255,8 +279,9 @@ export function IpoList() {
         </div>
       </div>
 
-      {/* Listing history is a different dataset with a different question
-          ("how did it actually do"), so it gets its own list and columns. */}
+      {/* Clipped so the slide-in after a swipe never widens the page. */}
+      <div className="overflow-x-clip">
+      <div key={swipe?.n ?? 0} className={swipe ? `aw-swipe-${swipe.dir}` : undefined}>
       {query.isPending && <ListSkeleton />}
 
       {query.isError && (
@@ -332,6 +357,8 @@ export function IpoList() {
           </p>
         </>
       )}
+      </div>
+      </div>
     </div>
   );
 }
