@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { listMarketIpos, getMarketIpoBySlug, registrarSlugForMarket, getDaywise, saveDaywise } from '../db/index.js';
 import { availableSources, mergeBySlug, source } from '../gmp/index.js';
+import { alignLatest } from '../gmp/alignLatest.js';
 import { logger } from '../lib/logger.js';
 import { parseSlug } from '../lib/validate.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -128,7 +129,9 @@ marketRouter.get('/gmp', async (req, res, next) => {
           source: r.source,
           sourceUpdatedAt: r.sourceUpdatedAt,
         })),
-        daywise: await daywise(row),
+        // Today's point follows the live premium, so the history ends on the
+        // same figure the list and the headline show.
+        daywise: alignLatest(await daywise(row), row),
         source: row.source,
         attribution,
       });

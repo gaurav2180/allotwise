@@ -140,6 +140,8 @@ export const gmpHistorySchema = z.object({
   slug: z.string(),
   name: z.string(),
   headline: z.number().nullable(),
+  /** The headline's percentage as the source prints it. */
+  headlinePct: z.number().nullable().default(null),
   updatedAt: z.string().nullable().default(null),
   source: z.string(),
   history: z.array(

@@ -15,8 +15,9 @@ import { capPrice, derivePhase, estProfitPerLot, formatLongDate, inr, listingGai
 const signColor = (n: number | null | undefined) =>
   n === null || n === undefined || n === 0 ? undefined : n > 0 ? "var(--positive)" : "var(--negative)";
 
-const pct1 = (n: number | null | undefined) =>
-  n === null || n === undefined || !Number.isFinite(n) ? "—" : `${n.toFixed(1)}%`;
+// Two decimals, as the list and the source print them.
+const pct = (n: number | null | undefined) =>
+  n === null || n === undefined || !Number.isFinite(n) ? "—" : `${n.toFixed(2)}%`;
 
 function statusLabel(ipo: IpoListItem): string {
   if (ipo.listing || ipo.listedOn || ipo.status === "listed") return "Listed";
@@ -87,12 +88,18 @@ export function GmpPage() {
   const points = history.data?.history ?? [];
   const latest = points.length ? points[points.length - 1] : null;
 
-  // The day-wise table is read for this page, so its last point is the newest
-  // reading there is; the list's figure is only as fresh as the last sync. The
-  // headline uses the newer one so it always matches the end of the chart.
-  const gmp = latest?.gmp ?? ipo?.gmp ?? null;
+  // One premium, the same one the list shows: the source's live figure, read
+  // from the same response as the chart. The backend brings the chart's
+  // latest day in line with it, so headline, chart, table and the row in the
+  // list all end on one number. The percentage is the source's own, as on the
+  // list, not recomputed here (₹76 on ₹271 printed as 28.0% beside a list
+  // reading 28.78% was how this used to disagree).
+  const headline = history.data?.headline ?? null;
+  const gmp = headline ?? ipo?.gmp ?? latest?.gmp ?? null;
   const issuePrice = capPrice(ipo?.priceBand);
-  const gmpPct = gmp !== null && issuePrice ? (gmp / issuePrice) * 100 : null;
+  const printedPct = headline !== null ? history.data?.headlinePct : ipo?.estGainPct;
+  const gmpPct =
+    printedPct ?? (gmp !== null && gmp === latest?.gmp ? latest.pct : null) ?? (gmp !== null && issuePrice ? (gmp / issuePrice) * 100 : null);
   const profit = estProfitPerLot(ipo?.lotSize, gmp);
   const expected = gmp !== null && issuePrice ? issuePrice + gmp : (latest?.indicative ?? null);
 
@@ -143,7 +150,7 @@ export function GmpPage() {
           <div className="mt-1">
             <OverviewRow
               label={listing ? "Last GMP" : "Current GMP"}
-              value={gmp === null ? "—" : gmpPct === null ? `₹${inr(gmp)}` : `₹${inr(gmp)} (${pct1(gmpPct)})`}
+              value={gmp === null ? "—" : gmpPct === null ? `₹${inr(gmp)}` : `₹${inr(gmp)} (${gmpPct > 0 ? "+" : ""}${pct(gmpPct)})`}
               color={signColor(gmp)}
             />
             {listing ? (
@@ -156,7 +163,7 @@ export function GmpPage() {
                 <OverviewRow label="Issue Price" value={`₹${inr(listing.issuePrice)}`} />
                 <OverviewRow
                   label="Listed At"
-                  value={`₹${inr(listing.price)} (${listing.gainPct > 0 ? "+" : ""}${pct1(listing.gainPct)})`}
+                  value={`₹${inr(listing.price)} (${listing.gainPct > 0 ? "+" : ""}${pct(listing.gainPct)})`}
                   color={signColor(listing.gainPct)}
                 />
               </>
@@ -213,7 +220,7 @@ export function GmpPage() {
                       <td className="num px-3 py-3.5 text-right" style={{ color: signColor(p.gmp) }}>
                         ₹{inr(p.gmp)}
                       </td>
-                      <td className="num px-3 py-3.5 text-right">{issuePrice ? pct1(p.pct) : "—"}</td>
+                      <td className="num px-3 py-3.5 text-right">{issuePrice ? pct(p.pct) : "—"}</td>
                       <td
                         className="num px-3 py-3.5 text-right"
                         style={{ color: signColor(p.change) ?? "var(--dim)" }}

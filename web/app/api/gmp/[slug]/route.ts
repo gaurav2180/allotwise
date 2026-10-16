@@ -7,7 +7,7 @@ type GmpResponse = {
   slug: string;
   name: string;
   source: string;
-  gmp: { value: number | null; sourceUpdatedAt: string | null }[];
+  gmp: { value: number | null; estGainPct: number | null; sourceUpdatedAt: string | null }[];
   daywise: {
     date: string;
     gmp: number;
@@ -38,6 +38,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ slug: strin
     slug: res.data.slug,
     name: res.data.name,
     headline: res.data.gmp?.[0]?.value ?? null,
+    headlinePct: res.data.gmp?.[0]?.estGainPct ?? null,
     updatedAt: res.data.gmp?.[0]?.sourceUpdatedAt ?? null,
     source: res.data.source,
     history: res.data.daywise ?? [],

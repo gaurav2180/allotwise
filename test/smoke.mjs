@@ -644,3 +644,38 @@ test('alerts: errors are described, repeats are throttled, incidents report once
 
   Object.assign(config.alerts, was);
 });
+
+test('gmp: the day-wise history ends on the live premium the list shows', async () => {
+  const { alignLatest } = await import('../src/gmp/alignLatest.js');
+  // HD Fire Protect, 16 Oct: live table ₹78 (+28.78%), its day-wise row ₹77,
+  // both stamped "16-Oct 20:37".
+  const points = [
+    { date: '2026-10-15', gmp: 82, pct: 30.26, indicative: 353, profit: 4510, change: -7 },
+    { date: '2026-10-16', gmp: 77, pct: 28.41, indicative: 348, profit: 4235, change: -5 },
+  ];
+  const row = { gmp: 78, estGainPct: 28.78, estListingPrice: 349, lotSize: 55, priceBand: '₹258 to ₹271', sourceUpdatedAt: '16-Oct 20:37' };
+  const night = new Date('2026-10-16T15:30:00Z');
+
+  const same = alignLatest(points, row, night);
+  assert.deepEqual(same.at(-1), { date: '2026-10-16', gmp: 78, pct: 28.78, indicative: 349, profit: 4290, change: -4 });
+  assert.deepEqual(same[0], points[0], 'earlier days stay as the source printed them');
+
+  // Next morning, before the source has a row for the 17th: the reading is
+  // still the 16th's, so no day is invented.
+  const morning = alignLatest(points, row, new Date('2026-10-17T03:00:00Z'));
+  assert.equal(morning.length, 2);
+  assert.equal(morning.at(-1).date, '2026-10-16');
+
+  // A live reading for a day the table has no row for yet is added as that day.
+  const added = alignLatest(points, { ...row, sourceUpdatedAt: '17-Oct 10:05' }, new Date('2026-10-17T05:00:00Z'));
+  assert.equal(added.length, 3);
+  assert.deepEqual(added.at(-1), { date: '2026-10-17', gmp: 78, pct: 28.78, indicative: 349, profit: 4290, change: 1 });
+
+  // Left alone: already agreeing, a table newer than the live reading, no
+  // live premium (dropped off the table), no timestamp to place it by.
+  assert.equal(alignLatest(points, { ...row, gmp: 77 }, night), points);
+  assert.equal(alignLatest(points, { ...row, sourceUpdatedAt: '15-Oct 18:00' }, night), points);
+  assert.equal(alignLatest(points, { ...row, gmp: null }, night), points);
+  assert.equal(alignLatest(points, { ...row, sourceUpdatedAt: null }, night), points);
+  assert.deepEqual(alignLatest([], row, night), []);
+});
