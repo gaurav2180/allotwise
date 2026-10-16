@@ -86,7 +86,8 @@ function listedColor(gainPct: number): string {
 
 /** Desktop column widths, shared with IpoListHeader so figures line up. */
 const COL = {
-  price: "sm:w-24",
+  // Wide enough for "₹1,065–₹1,120", a four-digit band.
+  price: "sm:w-32",
   // Wide enough for "₹1,455 (+75.37%)", the longest listed figure.
   gmp: "sm:w-32",
   subs: "sm:w-16",

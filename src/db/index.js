@@ -93,6 +93,10 @@ export function getDb() {
   const path = resolve(config.dbPath);
   mkdirSync(dirname(path), { recursive: true });
   db = new DatabaseSync(path);
+  // The scheduler runs each sync as its own process, and on start several run
+  // at once. Without a wait, a writer that finds another mid-write fails at
+  // once with "database is locked"; this lets it queue for up to 5s instead.
+  db.exec('PRAGMA busy_timeout = 5000;');
   db.exec('PRAGMA journal_mode = WAL;');
   db.exec('PRAGMA foreign_keys = ON;');
   db.exec(readFileSync(resolve(here, 'schema.sql'), 'utf8'));
