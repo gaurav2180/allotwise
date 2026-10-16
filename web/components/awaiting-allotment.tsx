@@ -65,9 +65,12 @@ export function issueSteps(ipo: IpoListItem, now = new Date()): StepSpec[] {
  * button that could only fail: where the issue stands, from opening to
  * listing, and when the check will open. The list re-reads itself every
  * minute, so once results are published the check replaces this on its own.
+ *
+ * `now` is the page's shared date (useToday), passed in rather than read from
+ * the clock here, so the strip moves to a new day in the same render as the
+ * row's status line and the tab it sits under.
  */
-export function AwaitingAllotment({ ipo }: { ipo: IpoListItem }) {
-  const now = new Date();
+export function AwaitingAllotment({ ipo, now }: { ipo: IpoListItem; now: Date }) {
   const steps = issueSteps(ipo, now);
   const phase = derivePhase(ipo, now);
   const due = ipo.allotmentDate;

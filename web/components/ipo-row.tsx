@@ -19,6 +19,7 @@ import { IpoLogo } from "@/components/ipo-logo";
 import { IpoDetailPanel } from "@/components/ipo-detail";
 import { useAllotmentCheck } from "@/hooks/use-allotment-check";
 import { useAccordionHeight } from "@/hooks/use-accordion-height";
+import { useToday } from "@/hooks/use-today";
 import type { IpoListItem } from "@/lib/schemas";
 import type { PanEntry } from "@/lib/pan";
 import {
@@ -39,32 +40,32 @@ import {
  * next click, so it says what can be done rather than what the record says.
  * Within a week a countdown reads faster than a date.
  */
-function stateLine(ipo: IpoListItem): string {
+export function stateLine(ipo: IpoListItem, now = new Date()): string {
   // A listed issue has an outcome, which outranks anything still pending. The
   // price it listed at has its own cell; this line says when.
   if (ipo.listing || ipo.listedOn) {
     const on = ipo.listedOn ?? ipo.listingDate;
     if (!on) return "Listed";
-    return relativeDay(on) === "today" ? "Listed today" : `Listed ${formatDate(on)}`;
+    return relativeDay(on, now) === "today" ? "Listed today" : `Listed ${formatDate(on)}`;
   }
-  if (allotmentPublished(ipo)) return "Allotment out";
+  if (allotmentPublished(ipo, now)) return "Allotment out";
   // The date has come but the registrar has not published yet: it sits in
   // Awaiting, and the line says why.
-  if (allotmentOut(ipo)) return "Allotment due today";
+  if (allotmentOut(ipo, now)) return "Allotment due today";
 
   // Derived from dates, not the scraped status, which goes stale overnight.
   // "Today" carries no date alongside it — it would just repeat the date the
   // reader is already looking at it on. Anything else pairs the relative word
   // with the actual date, since "in 2d" alone means checking a calendar.
-  switch (derivePhase(ipo)) {
+  switch (derivePhase(ipo, now)) {
     case "open": {
-      const rel = relativeDay(ipo.closeDate);
+      const rel = relativeDay(ipo.closeDate, now);
       if (rel === "today") return "Closes today";
       if (rel) return `Closes ${rel} (${formatDate(ipo.closeDate)})`;
       return ipo.closeDate ? `Open until ${formatDate(ipo.closeDate)}` : "Open now";
     }
     case "upcoming": {
-      const rel = relativeDay(ipo.openDate);
+      const rel = relativeDay(ipo.openDate, now);
       if (rel === "today") return "Opens today";
       if (rel) return `Opens ${rel} (${formatDate(ipo.openDate)})`;
       return ipo.openDate ? `Opens ${formatDate(ipo.openDate)}` : "Upcoming";
@@ -183,6 +184,9 @@ export function IpoRow({
   onToggle: () => void;
 }) {
   const panelId = useId();
+  // Shared with the tabs, so the status line and the tab move to a new day in
+  // the same render.
+  const today = useToday();
   const rowRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
   const accordion = useAccordionHeight(open, detailRef);
@@ -256,7 +260,7 @@ export function IpoRow({
           <div className="min-w-0 flex-1">
             <div className="truncate text-[14px] font-medium">{ipo.name}</div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[12px] text-dim">
-              <span>{stateLine(ipo)}</span>
+              <span>{stateLine(ipo, today)}</span>
               <span aria-hidden>·</span>
               <span className="shrink-0">{ipo.board === "sme" ? "SME" : "Mainboard"}</span>
             </div>
@@ -326,7 +330,7 @@ export function IpoRow({
           {showBody && (
             <div className="border-t border-border px-3 pb-3 sm:px-4 sm:pb-4">
               {/* Allotment first: checking a result is what the product is for. */}
-              <ExpandedBody ipo={ipo} pans={pans} panStoreReady={panStoreReady} check={check} />
+              <ExpandedBody ipo={ipo} today={today} pans={pans} panStoreReady={panStoreReady} check={check} />
               <IpoDetailPanel ipo={ipo} />
             </div>
           )}
@@ -338,18 +342,20 @@ export function IpoRow({
 
 function ExpandedBody({
   ipo,
+  today,
   pans,
   panStoreReady,
   check,
 }: {
   ipo: IpoListItem;
+  today: Date;
   pans: PanEntry[];
   panStoreReady: boolean;
   check: ReturnType<typeof useAllotmentCheck>;
 }) {
   // Still awaited, wherever it will be checked: a button now could only fail,
   // so the row shows where the issue stands and opens the check once it can.
-  if (!allotmentPublished(ipo)) return <AwaitingAllotment ipo={ipo} />;
+  if (!allotmentPublished(ipo, today)) return <AwaitingAllotment ipo={ipo} now={today} />;
 
   // Not every IPO can be checked in-app — only issues in a registrar we query,
   // once that registrar lists them. For the rest, the registrar's official
