@@ -249,6 +249,64 @@ export function clearStaleGmp(liveSlugs) {
     .run(...liveSlugs).changes;
 }
 
+/**
+ * Delete rows a live row has replaced under a new slug.
+ *
+ * The source renames an issue now and then -- "Bonfigloli Transmissions" was
+ * corrected to "Bonfiglioli Transmissions" -- and the new name slugs to a new
+ * row while the old one lingers as a dateless duplicate. The issue page id at
+ * the end of the source path does not change with the name, so a row that
+ * shares it with a live row is the same issue. As a fallback for rows saved
+ * before the path was recorded: a dateless, unquoted row whose name is a live
+ * row's name give or take two letters.
+ *
+ * Like clearStaleGmp, callers must pass the records of a SUCCESSFUL fetch.
+ */
+function editDistance(a, b) {
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+export function dropSupersededMarketRows(liveRecords) {
+  if (!liveRecords?.length) return 0;
+  const d = getDb();
+  const issueId = (p) => String(p ?? '').match(/\/(\d+)\/?$/)?.[1] ?? null;
+  const live = new Set(liveRecords.map((r) => r.slug));
+  const liveRows = d
+    .prepare(`SELECT slug, name, source_path FROM market_ipos WHERE slug IN (${[...live].map(() => '?').join(', ')})`)
+    .all(...live);
+  const liveIds = new Set(liveRows.map((r) => issueId(r.source_path)).filter(Boolean));
+  const liveNames = liveRows.map((r) => r.name.toLowerCase());
+
+  const doomed = d
+    .prepare('SELECT slug, name, source_path, open_date, gmp FROM market_ipos')
+    .all()
+    .filter((r) => !live.has(r.slug))
+    .filter((r) => {
+      const id = issueId(r.source_path);
+      if (id) return liveIds.has(id);
+      if (r.open_date !== null || r.gmp !== null) return false;
+      const name = r.name.toLowerCase();
+      return liveNames.some((n) => editDistance(n, name) <= 2);
+    })
+    .map((r) => r.slug);
+
+  for (const slug of doomed) {
+    d.prepare('DELETE FROM market_ipos WHERE slug = ?').run(slug);
+    d.prepare('DELETE FROM gmp_history WHERE slug = ?').run(slug);
+    d.prepare('DELETE FROM ipo_links WHERE market_slug = ?').run(slug);
+  }
+  return doomed.length;
+}
+
 export function recordGmpHistory(source, slug, gmp) {
   getDb()
     .prepare('INSERT INTO gmp_history (source, slug, gmp) VALUES (?, ?, ?)')
