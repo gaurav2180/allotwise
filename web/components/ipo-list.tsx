@@ -259,9 +259,7 @@ export function IpoList() {
         {/* Tabs partition by status, which a search query cuts across — shown
             during a search they'd sit there unable to actually filter anything. */}
         {!isSearching && (
-          <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:overflow-visible sm:px-0">
-            <FilterTabs options={tabs} value={filter} onChange={setFilter} label="Filter IPOs by status" />
-          </div>
+          <FilterTabs options={tabs} value={filter} onChange={setFilter} label="Filter IPOs by status" />
         )}
 
         {/* The saved-PAN count used to sit here as a sentence. It was a status

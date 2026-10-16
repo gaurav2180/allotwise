@@ -14,6 +14,11 @@ export interface TabOption<T extends string> {
  *
  * The indicator is measured from the active button rather than assuming equal
  * widths, because the labels carry counts and are not uniform.
+ *
+ * On a phone the strip spans the width and the tabs share it, each growing from
+ * its own label, with type and padding stepped down below 375px, so all four
+ * fit down to a 320px screen without scrolling, even with three-digit counts.
+ * From `sm` up it shrinks back to fit its contents.
  */
 export function FilterTabs<T extends string>({
   options,
@@ -54,7 +59,7 @@ export function FilterTabs<T extends string>({
       ref={listRef}
       role="tablist"
       aria-label={label}
-      className="relative inline-flex items-center gap-0.5 rounded-pill border border-border bg-surface p-0.5"
+      className="relative flex w-full items-center rounded-pill border border-border bg-surface p-0.5 sm:inline-flex sm:w-auto sm:gap-0.5"
       onKeyDown={(e) => {
         // Arrow keys move between tabs, as expected of a tablist.
         if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
@@ -92,8 +97,9 @@ export function FilterTabs<T extends string>({
               // used to be — at 44 the strip stood 54px tall and read as a
               // toolbar rather than a filter. Compact again once there is a
               // pointer.
-              "relative z-1 inline-flex min-h-9 items-center rounded-pill px-3 text-[13px] font-medium whitespace-nowrap sm:min-h-0",
-              "sm:px-3 sm:py-1",
+              "relative z-1 inline-flex min-h-9 flex-auto items-center justify-center rounded-pill px-0.5 text-[11px] font-medium tracking-tight whitespace-nowrap",
+              "min-[375px]:px-1 min-[375px]:text-[12px] min-[375px]:tracking-normal",
+              "sm:min-h-0 sm:flex-none sm:px-3 sm:py-1 sm:text-[13px]",
               "transition-colors duration-150",
               active ? "text-text" : "text-dim hover:text-text"
             )}
@@ -104,7 +110,12 @@ export function FilterTabs<T extends string>({
               // falls just under 4.5:1. Inactive tabs sit on surface, where it
               // passes — so the tone follows the state rather than the palette
               // being changed.
-              <span className={cn("num ml-1.5 text-[12px]", active ? "text-text" : "text-dim")}>
+              <span
+                className={cn(
+                  "num ml-0.5 text-[10px] min-[375px]:ml-1 min-[375px]:text-[11px] sm:ml-1.5 sm:text-[12px]",
+                  active ? "text-text" : "text-dim"
+                )}
+              >
                 {o.count}
               </span>
             )}
