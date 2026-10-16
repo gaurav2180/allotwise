@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareAllotted, compareOngoing, compareSearch, compareUpcoming } from "@/components/ipo-list";
+import { compareAllotted, compareAwaiting, compareOngoing, compareSearch, compareUpcoming } from "@/components/ipo-list";
 import type { IpoListItem } from "@/lib/schemas";
 
 /** Only the fields the comparators read; the rest of the row is irrelevant here. */
@@ -34,6 +34,17 @@ const names = (
   rows: IpoListItem[],
   cmp: (a: IpoListItem, b: IpoListItem, now?: Date) => number
 ) => [...rows].sort((a, b) => cmp(a, b, NOW)).map((r) => r.name);
+
+describe("Awaiting", () => {
+  it("puts the soonest allotment first, undated ones last", () => {
+    const rows = [
+      row({ name: "No date", closeDate: "2026-09-10" }),
+      row({ name: "Allots 15th", closeDate: "2026-09-11", allotmentDate: "2026-09-15" }),
+      row({ name: "Allots 13th", closeDate: "2026-09-10", allotmentDate: "2026-09-13" }),
+    ];
+    expect(names(rows, compareAwaiting)).toEqual(["Allots 13th", "Allots 15th", "No date"]);
+  });
+});
 
 describe("Ongoing", () => {
   it("puts open issues first, closing soonest", () => {
@@ -109,7 +120,7 @@ describe("Search", () => {
 });
 
 describe("every comparator", () => {
-  const all = [compareOngoing, compareUpcoming, compareAllotted, compareSearch];
+  const all = [compareOngoing, compareAwaiting, compareUpcoming, compareAllotted, compareSearch];
 
   it("is stable on identical dates, so rows do not jitter between renders", () => {
     const rows = [

@@ -18,22 +18,23 @@ import { useIpos } from "@/hooks/use-ipos";
 import type { IpoListItem } from "@/lib/schemas";
 import { allotmentOut, derivePhase } from "@/lib/utils";
 
-type Filter = "ongoing" | "upcoming" | "allotted";
+type Filter = "ongoing" | "awaiting" | "upcoming" | "allotted";
 type BoardFilter = "all" | "mainboard" | "sme";
 
 /**
- * The three states an issue can be in, from an applicant's point of view.
+ * The four states an issue can be in, from an applicant's point of view.
  * Exhaustive by construction — every current IPO lands in exactly one, so
  * nothing is hidden by the absence of an "All" tab.
  *
- * "Ongoing" deliberately includes an issue that has closed but whose allotment
- * has not been published: from the applicant's side it is still in flight.
+ * "Awaiting" is the gap between the issue closing and its allotment coming
+ * out: too late to apply, too early to check.
  */
 function bucketOf(ipo: IpoListItem): Filter {
   if (ipo.allotment.available || ipo.listedOn || ipo.listing || allotmentOut(ipo)) return "allotted";
   // Dates over scraped status: an issue that opened overnight is no longer
   // upcoming, whatever the last sync recorded.
-  return derivePhase(ipo) === "upcoming" ? "upcoming" : "ongoing";
+  const phase = derivePhase(ipo);
+  return phase === "upcoming" ? "upcoming" : phase === "open" ? "ongoing" : "awaiting";
 }
 
 /**
@@ -73,6 +74,18 @@ export function compareOngoing(a: IpoListItem, b: IpoListItem, now = new Date())
   // Closed and waiting: whichever closed most recently is furthest from its
   // allotment, but it is also the one the reader just applied to.
   return (b.closeDate ?? LONG_PAST).localeCompare(a.closeDate ?? LONG_PAST) || byName(a, b);
+}
+
+/**
+ * Allotment soonest first: that is the date the reader is waiting on. An issue
+ * with no allotment date sits after the dated ones, latest closed first.
+ */
+export function compareAwaiting(a: IpoListItem, b: IpoListItem, _now = new Date()): number {
+  return (
+    (a.allotmentDate ?? FAR_FUTURE).localeCompare(b.allotmentDate ?? FAR_FUTURE) ||
+    (b.closeDate ?? LONG_PAST).localeCompare(a.closeDate ?? LONG_PAST) ||
+    byName(a, b)
+  );
 }
 
 /** Opening soonest first; an issue with no date announced sits at the end. */
@@ -166,7 +179,7 @@ export function IpoList() {
   }, [query.data, board]);
 
   const counts = useMemo(() => {
-    const c = { ongoing: 0, upcoming: 0, allotted: 0 };
+    const c = { ongoing: 0, awaiting: 0, upcoming: 0, allotted: 0 };
     for (const r of scoped) c[bucketOf(r)] += 1;
     return c;
   }, [scoped]);
@@ -179,7 +192,7 @@ export function IpoList() {
     if (chosen.current || !query.data) return;
     chosen.current = true;
     remembered.chosen = true;
-    const first = (["allotted", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
+    const first = (["allotted", "awaiting", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
     if (first && first !== "allotted") {
       remembered.filter = first;
       setFilterState(first);
@@ -196,6 +209,7 @@ export function IpoList() {
 
     if (isSearching) return [...list].sort(compareSearch);
     if (filter === "allotted") return [...list].sort(compareAllotted);
+    if (filter === "awaiting") return [...list].sort(compareAwaiting);
     if (filter === "upcoming") return [...list].sort(compareUpcoming);
     return [...list].sort(compareOngoing);
   }, [scoped, filter, isSearching, q]);
@@ -208,6 +222,7 @@ export function IpoList() {
   const tabs: TabOption<Filter>[] = useMemo(
     () => [
       { value: "allotted", label: "Allotted", count: counts.allotted },
+      { value: "awaiting", label: "Awaiting", count: counts.awaiting },
       { value: "ongoing", label: "Ongoing", count: counts.ongoing },
       { value: "upcoming", label: "Upcoming", count: counts.upcoming },
     ],
@@ -258,12 +273,14 @@ export function IpoList() {
 
       {query.data && rows.length === 0 && !isSearching && (
         <NoMatchesState
-          filter={[board === "all" ? "" : board, filter].filter(Boolean).join(" ")}
+          filter={[board === "all" ? "" : board, filter === "awaiting" ? "awaiting-allotment" : filter]
+            .filter(Boolean)
+            .join(" ")}
           // Clearing the board filter is the useful escape here — the tab is a
           // real state, not a mistake, so send them to one that has issues in it.
           onReset={() => {
             setBoard("all");
-            const first = (["allotted", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
+            const first = (["allotted", "awaiting", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
             if (first) setFilter(first);
           }}
         />
