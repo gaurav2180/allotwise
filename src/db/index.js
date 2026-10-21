@@ -451,6 +451,23 @@ export function latestSyncRuns() {
     .all();
 }
 
+/**
+ * The company a registrar's list most recently added, and when. A list sync
+ * that succeeds against a stale copy of the list still reports success; how
+ * long ago anything new appeared is what gives that away.
+ */
+export function newestRegistrarIpo(registrar) {
+  return (
+    getDb()
+      .prepare(
+        `SELECT name, first_seen_at AS firstSeenAt,
+                CAST((strftime('%s','now') - strftime('%s', first_seen_at)) / 86400 AS INTEGER) AS daysAgo
+           FROM ipos WHERE registrar = ? ORDER BY first_seen_at DESC, id DESC LIMIT 1`
+      )
+      .get(registrar) ?? null
+  );
+}
+
 /** Store an issue's day-wise GMP table, as read from its page. */
 export function saveDaywise(slug, points) {
   return getDb()

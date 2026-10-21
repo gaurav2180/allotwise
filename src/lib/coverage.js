@@ -1,4 +1,4 @@
-import { listMarketIpos, registrarSlugForMarket, latestSyncRuns } from '../db/index.js';
+import { listMarketIpos, registrarSlugForMarket, latestSyncRuns, newestRegistrarIpo } from '../db/index.js';
 import { mergeBySlug } from '../gmp/index.js';
 import { supportedRegistrars } from '../registrars/index.js';
 
@@ -82,7 +82,12 @@ export function registrarHealth() {
     const canaryFailing = Boolean(canary && !canary.ok);
 
     out[name] = {
-      list: list ? { ok: Boolean(list.ok), companies: list.seen, lastOkMinutesAgo: list.lastOkMinutes } : null,
+      list: list
+        ? { ok: Boolean(list.ok), companies: list.seen, lastOkMinutesAgo: list.lastOkMinutes, error: list.ok ? null : list.error }
+        : null,
+      // A list read from a stale copy still syncs "successfully"; the age of
+      // the newest company it has added is what shows it.
+      newest: newestRegistrarIpo(name),
       selfTest: canary ? { ok: Boolean(canary.ok), minutesAgo: canary.ageMinutes, error: canary.ok ? null : canary.error } : null,
     };
     if (listStale) {
