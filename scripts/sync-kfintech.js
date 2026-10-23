@@ -21,10 +21,31 @@ const NEEDLE = "JSON.parse('";
 // sync found no IPOs at all — which left every KFintech issue uncheckable.
 const HEADERS = { 'User-Agent': config.gmp.userAgent, Accept: '*/*' };
 
+/**
+ * One of KFintech's two public files, as text: directly, or through the
+ * Mumbai relay when one is configured. KFintech serves its status site only
+ * inside India; from anywhere else the code file comes back as a placeholder
+ * page, which is how production lost the list for three weeks.
+ */
+async function fetchSiteFile(url, what) {
+  const { listRelayUrl, relaySecret } = config.kfintech;
+  let res;
+  if (listRelayUrl) {
+    const path = new URL(url).pathname.replace(/^\//, '');
+    res = await fetch(`${listRelayUrl}?path=${encodeURIComponent(path)}`, {
+      headers: { 'x-relay-secret': relaySecret ?? '' },
+      signal: AbortSignal.timeout(25_000),
+    });
+    if (!res.ok) throw new Error(`${what} fetch through the Mumbai relay failed: HTTP ${res.status}`);
+  } else {
+    res = await fetch(url, { redirect: 'follow', headers: HEADERS });
+    if (!res.ok) throw new Error(`${what} fetch failed: HTTP ${res.status}`);
+  }
+  return res.text();
+}
+
 async function resolveBundleUrl() {
-  const res = await fetch(config.kfintech.bundleIndex, { redirect: 'follow', headers: HEADERS });
-  if (!res.ok) throw new Error(`index fetch failed: HTTP ${res.status}`);
-  const html = await res.text();
+  const html = await fetchSiteFile(config.kfintech.bundleIndex, 'index');
   const m = html.match(/src="\.?\/?(static\/js\/main\.[a-f0-9]+\.js)"/i);
   if (!m) throw new Error('could not locate main bundle in index.html');
   return new URL(m[1], config.kfintech.bundleIndex).toString();
@@ -56,9 +77,16 @@ async function main() {
     bundleUrl = await resolveBundleUrl();
     logger.info('resolved bundle', { bundleUrl });
 
-    const res = await fetch(bundleUrl, { headers: HEADERS });
-    if (!res.ok) throw new Error(`bundle fetch failed: HTTP ${res.status}`);
-    const entries = extractClients(await res.text());
+    const src = await fetchSiteFile(bundleUrl, 'bundle');
+    // A page instead of code: KFintech's answer to a visitor outside India.
+    if (/^\s*</.test(src)) {
+      throw new Error(
+        config.kfintech.listRelayUrl
+          ? 'KFintech served a placeholder page instead of its code, even through the Mumbai relay'
+          : 'KFintech served a placeholder page instead of its code -- it does this outside India; set KFINTECH_LIST_RELAY_URL'
+      );
+    }
+    const entries = extractClients(src);
 
     if (entries.length === 0) {
       throw new Error('no clientId entries found -- bundle structure may have changed');

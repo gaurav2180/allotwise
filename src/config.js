@@ -23,6 +23,11 @@ export const config = {
       'https://0uz601ms56.execute-api.ap-south-1.amazonaws.com/prod/api/query'
     ),
     bundleIndex: str(process.env.KFINTECH_BUNDLE_INDEX, 'https://ipostatus.kfintech.com/'),
+    // KFintech serves its status site only inside India. Outside it (Railway),
+    // the list is fetched through the relay in kfintech-relay/, deployed to
+    // Mumbai. Unset, the site is fetched directly, which works from India.
+    listRelayUrl: str(process.env.KFINTECH_LIST_RELAY_URL, undefined),
+    relaySecret: str(process.env.KFINTECH_RELAY_SECRET, undefined),
     timeoutMs: num(process.env.KFINTECH_TIMEOUT_MS, 8000),
     maxRetries: num(process.env.KFINTECH_MAX_RETRIES, 3),
     maxConcurrency: num(process.env.KFINTECH_MAX_CONCURRENCY, 4),

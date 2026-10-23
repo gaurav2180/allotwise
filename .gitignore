@@ -69,3 +69,7 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .vercel
+
+# KFintech relay: the generated secret and Vercel's local project link.
+kfintech-relay/.relay-secret.txt
+kfintech-relay/.vercel/
