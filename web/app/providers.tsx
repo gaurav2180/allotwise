@@ -3,6 +3,7 @@
 import { ThemeProvider } from "next-themes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
+import { ServiceWorkerSetup } from "@/components/pwa";
 
 export function Providers({ children }: { children: ReactNode }) {
   // Created in state so each browser session gets one client and it survives
@@ -28,6 +29,7 @@ export function Providers({ children }: { children: ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+        <ServiceWorkerSetup />
         {children}
       </ThemeProvider>
     </QueryClientProvider>

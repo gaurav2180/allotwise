@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ipoListSchema, apiErrorSchema, type IpoList } from "@/lib/schemas";
 
@@ -50,8 +50,29 @@ async function fetchIpos(): Promise<IpoList> {
 
   const parsed = ipoListSchema.safeParse(body);
   if (!parsed.success) throw new Error("The IPO data was in an unexpected format.");
+  // The offline worker answers with its saved copy when the network does not,
+  // stamped with when it saved it. That copy is shown, and said to be old; it
+  // is not remembered as if it were fresh.
+  const savedAt = Number(res.headers.get("x-aw-saved-at"));
+  if (savedAt > 0) return { ...parsed.data, savedAt };
   remember(parsed.data);
   return parsed.data;
+}
+
+/**
+ * When the IPO list on screen was saved, if it is the offline worker's copy
+ * rather than a fresh one; null otherwise. Reads the shared list without
+ * fetching it, so any page can ask.
+ */
+export function useIposSavedAt(): number | null {
+  // Subscribed to the cache rather than through useQuery, which insists on a
+  // fetch function even when it is never meant to fetch.
+  const queryClient = useQueryClient();
+  return useSyncExternalStore(
+    (onChange) => queryClient.getQueryCache().subscribe(onChange),
+    () => queryClient.getQueryData<IpoList>(QUERY_KEY)?.savedAt ?? null,
+    () => null
+  );
 }
 
 /**

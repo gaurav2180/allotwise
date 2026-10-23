@@ -102,6 +102,8 @@ export const ipoListSchema = z.object({
   count: z.number(),
   ipos: z.array(ipoListItemSchema),
   attribution: z.array(z.string()),
+  /** Set by the client, never the API: when the offline copy shown was saved. */
+  savedAt: z.number().optional(),
 });
 
 /** Full record for one IPO, from /api/ipo/[slug]. Every field is nullable —

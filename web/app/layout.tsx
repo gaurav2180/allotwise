@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { fontVariables } from "@/lib/fonts";
 import { Providers } from "./providers";
 import "./globals.css";
@@ -6,12 +6,26 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Allotwise — IPO allotment and GMP",
   description:
-    "Check IPO allotment across KFintech, MUFG Intime and Bigshare, and track grey market premium for open issues.",
+    "Check IPO allotment across KFintech, MUFG Intime, Bigshare and Maashitla, and track grey market premium for current issues.",
   // Rows are full of date-like text ("Closes in 4d", "Listed 4 Sept") and PANs
   // that look number-ish. Without this, iOS Safari's data detectors rewrite
   // that text into links before React hydrates, which is a genuine hydration
   // mismatch — not a bug in this app's render output.
   formatDetection: { telephone: false, date: false, email: false, address: false },
+  // Added to an iPhone home screen, it opens full-screen under its own name
+  // rather than as a Safari tab.
+  appleWebApp: { capable: true, title: "Allotwise", statusBarStyle: "default" },
+  // Next writes only the standard mobile-web-app-capable; iPhones before iOS
+  // 16.4 read Apple's own name for it, and without it open a Safari tab.
+  other: { "apple-mobile-web-app-capable": "yes" },
+};
+
+// The browser's own bar takes the page colour, in either theme.
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F5F5F3" },
+    { media: "(prefers-color-scheme: dark)", color: "#0E0E11" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -28,6 +42,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           dangerouslySetInnerHTML={{
             __html:
               'try{var p=location.pathname;if(p==="/"||p==="/app"||p==="/gmp"){window.__awIpos=fetch("/api/ipos",{cache:"no-store"})}}catch(e){}',
+          }}
+        />
+        {/* Chrome's "can install" event fires once per page load, often before
+            the app's own code has run. Kept here for components/pwa.tsx, which
+            shows its own Install button instead of Chrome's bar. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              'window.addEventListener("beforeinstallprompt",function(e){e.preventDefault();window.__awInstall=e;window.dispatchEvent(new Event("aw-installable"))});',
           }}
         />
       </head>

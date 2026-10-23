@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { IpoList } from "@/components/ipo-list";
 import { AppFooter } from "@/components/app-footer";
+import { InstallCard } from "@/components/pwa";
 
 export const metadata: Metadata = {
   title: "IPOs — Allotwise",
@@ -16,6 +17,7 @@ export default function AppPage() {
           for your saved PANs.
         </p>
       </div>
+      <InstallCard />
       <IpoList />
       <AppFooter />
     </>

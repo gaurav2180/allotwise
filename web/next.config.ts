@@ -91,7 +91,11 @@ const nextConfig: NextConfig = {
             "base-uri 'none'",
             "form-action 'self'",
             "frame-ancestors 'none'",
-            "upgrade-insecure-requests",
+            // Off only for a local production build served over plain http
+            // (CSP_NO_UPGRADE=1): WebKit, unlike Chrome, upgrades localhost
+            // too, which breaks testing the iPhone engine locally. Never set
+            // in deployment.
+            ...(process.env.CSP_NO_UPGRADE === "1" ? [] : ["upgrade-insecure-requests"]),
           ].join("; "),
         }
       );

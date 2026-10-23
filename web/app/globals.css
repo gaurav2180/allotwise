@@ -381,6 +381,16 @@
       opacity: 0.3;
     }
   }
+  /* A bottom sheet rising into place (the iPhone install steps). */
+  @keyframes aw-sheet-up {
+    from {
+      transform: translateY(24px);
+      opacity: 0;
+    }
+  }
+  .aw-sheet-up {
+    animation: aw-sheet-up 260ms var(--ease-slide) both;
+  }
   .aw-swipe-left {
     animation: aw-swipe-from-right 240ms var(--ease-slide) both;
   }
