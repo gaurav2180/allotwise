@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { FilterTabs, type TabOption } from "@/components/filter-tabs";
 import { Select } from "@/components/ui/select";
 import { IpoRow, IpoListHeader } from "@/components/ipo-row";
+import { Pager } from "@/components/pager";
 import {
   ListSkeleton,
   NoMatchesState,
@@ -133,12 +135,57 @@ const BOARDS: { value: BoardFilter; label: string }[] = [
 // GMP page or PANs and back lands on the same tab, filter and open row. Module
 // scope rather than storage: it resets on a full reload, so the server-rendered
 // defaults and the first client render always agree.
-const remembered: { filter: Filter; board: BoardFilter; openKey: string | null; chosen: boolean } = {
+const remembered: {
+  filter: Filter;
+  board: BoardFilter;
+  openKey: string | null;
+  chosen: boolean;
+  page: number;
+} = {
   filter: "allotted",
   board: "all",
   openKey: null,
   chosen: false,
+  page: 0,
 };
+
+/**
+ * Allotted grows by every issue that has ever been allotted, so long lists are
+ * paged. Fifteen rows is about two thumb-scrolls on a phone and one screen on
+ * a laptop; the other tabs rarely reach it, and a search can.
+ */
+const PAGE_SIZE = 15;
+
+const rowKey = (r: IpoListItem) => `${r.source}:${r.slug}`;
+
+/** The rows one tab (or a search) shows, in that tab's order. */
+function rowsFor(scoped: IpoListItem[], filter: Filter, q: string, today: Date): IpoListItem[] {
+  // A search spans every status — the tabs partition by where an issue
+  // stands, not by what it's named, so bucketing would hide the very row
+  // being searched for if it sits in a different tab than the current one.
+  const list = q ? scoped.filter((r) => r.name.toLowerCase().includes(q)) : scoped.filter((r) => bucketOf(r, today) === filter);
+  const by = (cmp: (a: IpoListItem, b: IpoListItem, now: Date) => number) =>
+    [...list].sort((a, b) => cmp(a, b, today));
+  if (q) return by(compareSearch);
+  if (filter === "allotted") return by(compareAllotted);
+  if (filter === "awaiting") return by(compareAwaiting);
+  if (filter === "upcoming") return by(compareUpcoming);
+  return by(compareOngoing);
+}
+
+/**
+ * Hands the list the IPO a link asked for, as /app?ipo=<slug>. Read through
+ * the router rather than window.location, which a link clicked inside the app
+ * has not updated yet when the list first renders. Its own Suspense boundary
+ * keeps the rest of the list server-rendered.
+ */
+function RequestedIpo({ onRequest }: { onRequest: (slug: string) => void }) {
+  const slug = useSearchParams().get("ipo");
+  useEffect(() => {
+    if (slug) onRequest(slug);
+  }, [slug, onRequest]);
+  return null;
+}
 
 export function IpoList() {
   const [filter, setFilterState] = useState<Filter>(() => remembered.filter);
@@ -146,18 +193,16 @@ export function IpoList() {
   // Lifted here rather than kept local to IpoRow, so opening one row can
   // close whichever other one was open — only one detail panel expanded
   // at a time.
-  const [openKey, setOpenKeyState] = useState<string | null>(() => remembered.openKey);
+  const [openKey, setOpenKey] = useState<string | null>(() => remembered.openKey);
+  const [page, setPage] = useState(() => remembered.page);
+  // A different tab or board is a different list, so it starts on its first page.
   const setFilter = (v: Filter) => {
-    remembered.filter = v;
     setFilterState(v);
+    setPage(0);
   };
   const setBoard = (v: BoardFilter) => {
-    remembered.board = v;
     setBoardState(v);
-  };
-  const setOpenKey = (v: string | null) => {
-    remembered.openKey = v;
-    setOpenKeyState(v);
+    setPage(0);
   };
   // Only a *switch* — a different row already open — should scroll the newly
   // opened one into view: that's the case where a row collapsing elsewhere
@@ -189,13 +234,44 @@ export function IpoList() {
     return c;
   }, [scoped, today]);
 
+  // A link to one IPO (/app?ipo=<slug>, from the landing page) opens the list
+  // where that IPO is: its tab, its page, its row expanded and scrolled to.
+  // Anything that would hide it — a board filter that excludes it, a search
+  // left over from before — is cleared. Decided during render, once the list
+  // has arrived, so the first paint is already the right one.
+  const [focusSlug, setFocusSlug] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  if (focusSlug && query.data) {
+    setFocusSlug(null);
+    const target = query.data.ipos.find((r) => r.slug === focusSlug);
+    if (target) {
+      const tab = bucketOf(target, today);
+      const inBoard = board === "all" || target.board === board;
+      const pool = inBoard ? scoped : query.data.ipos;
+      const at = rowsFor(pool, tab, "", today).findIndex((r) => r.slug === target.slug);
+      setChosen(true);
+      if (!inBoard) setBoardState("all");
+      setFilterState(tab);
+      setPage(Math.max(0, Math.floor(at / PAGE_SIZE)));
+      setOpenKey(rowKey(target));
+      setScrollOnOpen(true);
+      setFocused(true);
+    }
+  }
+  useEffect(() => {
+    if (!focused) return;
+    if (search) setSearch("");
+    // Done with: a refresh or a later visit should not jump there again.
+    window.history.replaceState(window.history.state, "", "/app");
+  }, [focused, search, setSearch]);
+
   // Land on a tab that actually has something. Allotted comes first and is
   // the default — checking a result is the reason most visits happen — with
   // ongoing and upcoming as fallbacks. Runs once, so the tab never moves under
   // the user afterwards. Decided during render, the way React adjusts state to
   // new props, so the first list paints on the right tab rather than flashing
   // an empty one first.
-  if (!chosen && query.data) {
+  if (!chosen && !focusSlug && query.data) {
     setChosen(true);
     const first = (["allotted", "awaiting", "ongoing", "upcoming"] as const).find((b) => counts[b] > 0);
     if (first && first !== "allotted") setFilterState(first);
@@ -204,24 +280,34 @@ export function IpoList() {
   useEffect(() => {
     remembered.chosen = chosen;
     remembered.filter = filter;
-  }, [chosen, filter]);
+    remembered.board = board;
+    remembered.openKey = openKey;
+    remembered.page = page;
+  }, [chosen, filter, board, openKey, page]);
 
-  const rows = useMemo(() => {
-    // A search spans every status — the tabs partition by where an issue
-    // stands, not by what it's named, so bucketing would hide the very row
-    // being searched for if it sits in a different tab than the current one.
-    const list = isSearching
-      ? scoped.filter((r) => r.name.toLowerCase().includes(q))
-      : scoped.filter((r) => bucketOf(r, today) === filter);
+  // A new search is a new list: back to its first page.
+  const [pagedQuery, setPagedQuery] = useState(q);
+  if (pagedQuery !== q) {
+    setPagedQuery(q);
+    setPage(0);
+  }
 
-    const by = (cmp: (a: IpoListItem, b: IpoListItem, now: Date) => number) =>
-      [...list].sort((a, b) => cmp(a, b, today));
-    if (isSearching) return by(compareSearch);
-    if (filter === "allotted") return by(compareAllotted);
-    if (filter === "awaiting") return by(compareAwaiting);
-    if (filter === "upcoming") return by(compareUpcoming);
-    return by(compareOngoing);
-  }, [scoped, filter, isSearching, q, today]);
+  const rows = useMemo(() => rowsFor(scoped, filter, q, today), [scoped, filter, q, today]);
+
+  // The page shown, kept in range as the list changes under it (an issue
+  // moving tab can shorten it by one).
+  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const shownPage = Math.min(page, pages - 1);
+  const pageRows = rows.slice(shownPage * PAGE_SIZE, (shownPage + 1) * PAGE_SIZE);
+  const listTop = useRef<HTMLDivElement>(null);
+  const goToPage = (p: number) => {
+    setPage(p);
+    setOpenKey(null);
+    // Back to the top of the list, but only if it has scrolled out of view:
+    // the pager sits under the last row, and a new page starts at the first.
+    const top = listTop.current;
+    if (top && top.getBoundingClientRect().top < 0) top.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
 
   // Memoized so its identity is stable across renders that don't actually
   // change the counts (opening a row, for one) — FilterTabs re-measures and
@@ -255,6 +341,9 @@ export function IpoList() {
 
   return (
     <div>
+      <Suspense fallback={null}>
+        <RequestedIpo onRequest={setFocusSlug} />
+      </Suspense>
       <div className="mb-4 space-y-3">
         {/* Tabs partition by status, which a search query cuts across — shown
             during a search they'd sit there unable to actually filter anything. */}
@@ -320,10 +409,11 @@ export function IpoList() {
               <NoPansBanner />
             </div>
           )}
+          <div ref={listTop} className="scroll-mt-3" />
           <IpoListHeader />
           <div className="overflow-hidden rounded-card border border-border bg-surface">
-            {rows.map((ipo) => {
-              const key = `${ipo.source}:${ipo.slug}`;
+            {pageRows.map((ipo) => {
+              const key = rowKey(ipo);
               return (
                 <IpoRow
                   key={key}
@@ -341,6 +431,14 @@ export function IpoList() {
               );
             })}
           </div>
+          <Pager
+            page={shownPage}
+            pages={pages}
+            total={rows.length}
+            pageSize={PAGE_SIZE}
+            onChange={goToPage}
+            label={isSearching ? "Search result pages" : "IPO list pages"}
+          />
           {/* Two facts earn their place here: a dash is a coverage gap rather
               than a zero, and the premium is not a quoted price. Which tracker
               a given figure came from is not one of them — the day-wise panel

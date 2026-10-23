@@ -4,7 +4,7 @@ import Link from "next/link";
 import { CaretDownIcon, CaretUpIcon } from "@phosphor-icons/react";
 import { useIpos } from "@/hooks/use-ipos";
 import type { IpoListItem } from "@/lib/schemas";
-import { inr } from "@/lib/utils";
+import { appIpoHref, inr } from "@/lib/utils";
 
 const tone = (n: number | null) =>
   n === null || n === 0 ? "var(--dim)" : n > 0 ? "var(--positive)" : "var(--negative)";
@@ -16,7 +16,7 @@ function Item({ r, hidden }: { r: IpoListItem; hidden?: boolean }) {
   const Caret = (pct ?? r.gmp ?? 0) < 0 ? CaretDownIcon : CaretUpIcon;
   return (
     <Link
-      href="/app"
+      href={appIpoHref(r.slug)}
       aria-hidden={hidden}
       tabIndex={hidden ? -1 : undefined}
       className="group flex shrink-0 items-center gap-2.5 rounded-pill px-3 py-1.5 text-[13px] whitespace-nowrap transition-colors duration-150 hover:bg-row-hover"

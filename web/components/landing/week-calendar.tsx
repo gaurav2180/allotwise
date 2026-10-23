@@ -5,7 +5,7 @@ import Link from "next/link";
 import { IpoHoverCard, type HoverTarget } from "@/components/landing/ipo-hover-card";
 import { useIpos } from "@/hooks/use-ipos";
 import type { IpoListItem } from "@/lib/schemas";
-import { cn } from "@/lib/utils";
+import { appIpoHref, cn } from "@/lib/utils";
 
 type Kind = "allotment" | "listing" | "opens" | "closes";
 
@@ -44,7 +44,7 @@ type Hover = { enter: (e: Event, el: HTMLElement) => void; leave: () => void };
 function Chip({ e, hover }: { e: Event; hover?: Hover }) {
   return (
     <Link
-      href="/app"
+      href={appIpoHref(e.ipo.slug)}
       // The card shows the same facts as the title would, so it replaces it
       // wherever it is wired; the plain title stays for the phone agenda.
       title={hover ? undefined : `${KINDS.find((k) => k.kind === e.kind)!.label}: ${e.ipo.name}`}

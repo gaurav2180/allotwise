@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRightIcon } from "@phosphor-icons/react";
 import { IpoLogo } from "@/components/ipo-logo";
 import { useIpos } from "@/hooks/use-ipos";
-import { derivePhase, estProfitPerLot, inr, signedPct } from "@/lib/utils";
+import { appIpoHref, derivePhase, estProfitPerLot, inr, signedPct } from "@/lib/utils";
 
 const tone = (n: number | null) =>
   n === null || n === 0 ? "var(--dim)" : n > 0 ? "var(--positive)" : "var(--negative)";
@@ -73,7 +73,11 @@ export function LiveGmp() {
               const profit = estProfitPerLot(r.lotSize, r.gmp);
               const phase = derivePhase(r);
               return (
-                <li key={r.slug} className="flex items-center gap-3 px-4 py-3">
+                <li key={r.slug}>
+                  <Link
+                    href={appIpoHref(r.slug)}
+                    className="flex items-center gap-3 px-4 py-3 transition-colors duration-150 hover:bg-row-hover focus-visible:bg-row-hover"
+                  >
                   <IpoLogo name={r.name} src={r.logo} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline gap-2">
@@ -104,6 +108,7 @@ export function LiveGmp() {
                   <span className="num w-16 shrink-0 text-right text-[13px] font-medium" style={{ color: tone(profit) }}>
                     {profit === null ? "—" : `₹${inr(profit)}`}
                   </span>
+                  </Link>
                 </li>
               );
             })}

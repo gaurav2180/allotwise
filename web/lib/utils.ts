@@ -159,6 +159,15 @@ export function allotmentPublished(
  * UTC: for anyone in India that is still yesterday until 5:30 in the morning,
  * so an allotment due today would have read as "tomorrow" overnight.
  */
+/**
+ * A link to one IPO in the app's list: the list opens on its tab and page,
+ * expands its row and scrolls to it. Used wherever an issue is named outside
+ * the list, like the landing page.
+ */
+export function appIpoHref(slug: string): string {
+  return `/app?ipo=${encodeURIComponent(slug)}`;
+}
+
 export function localDate(d = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
