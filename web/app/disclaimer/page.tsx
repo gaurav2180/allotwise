@@ -9,12 +9,13 @@ export const metadata: Metadata = {
 
 export default function DisclaimerPage() {
   return (
-    <LegalShell title="Disclaimer" updated="5 September 2026">
+    <LegalShell title="Disclaimer" updated="21 October 2026">
       <LegalSection title="1. Independent, unofficial tool">
         <p>
           Allotwise is an independent tool built to read data that registrars, exchanges, and public trackers
           already publish. It is not affiliated with, endorsed by, or connected to KFintech, Link Intime
-          (MUFG Intime), Bigshare, NSE, BSE, SEBI, InvestorGain, or any issuer company named on this site.
+          (MUFG Intime), Bigshare, Maashitla, NSE, BSE, SEBI, InvestorGain, or any issuer company named on
+          this site.
         </p>
       </LegalSection>
 
@@ -45,14 +46,11 @@ export default function DisclaimerPage() {
 
       <LegalSection title="5. Allotment results">
         <p>
-          Allotment status is fetched directly from the registrar you&rsquo;re checking against (KFintech or
-          Link Intime / MUFG Intime) at the moment you run the check. Allotwise passes that result through —
-          it does not decide, delay, or influence an allotment outcome. Errors, delays, or downtime at the
-          registrar&rsquo;s end are outside Allotwise&rsquo;s control.
-        </p>
-        <p>
-          Bigshare enforces a captcha that cannot be solved automatically, so Allotwise links to
-          Bigshare&rsquo;s own status page instead of returning a result directly.
+          Allotment status is fetched directly from the registrar you&rsquo;re checking against — KFintech,
+          Link Intime (MUFG Intime), Bigshare, or Maashitla, whichever one the issue uses — at the moment you
+          run the check. Allotwise passes that result through; it does not decide, delay, or influence an
+          allotment outcome. Errors, delays, or downtime at the registrar&rsquo;s end are outside
+          Allotwise&rsquo;s control.
         </p>
       </LegalSection>
 

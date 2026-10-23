@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
   return (
-    <LegalShell title="Privacy policy" updated="5 September 2026">
+    <LegalShell title="Privacy policy" updated="21 October 2026">
       <LegalSection title="1. The short version">
         <p>
           A PAN is identity data, so the design goal was to never hold it. There is no sign-up, no profile,
@@ -69,10 +69,13 @@ export default function PrivacyPage() {
 
       <LegalSection title="7. Who else sees your data">
         <p>
-          Running a check against KFintech or Link Intime / MUFG Intime sends your PAN to that registrar,
-          which processes it under its own privacy practices — Allotwise doesn&rsquo;t control those. A
-          Bigshare check happens entirely on Bigshare&rsquo;s own site, reached through a deep link; Allotwise
-          never sees that PAN at all.
+          Running a check sends your PAN to the registrar you&rsquo;re checking against — KFintech, Link
+          Intime (MUFG Intime), Bigshare, or Maashitla — which processes it under its own privacy practices.
+          Allotwise doesn&rsquo;t control those practices, but it does not hand your PAN to anyone else: see{" "}
+          <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
+            Disclaimer
+          </Link>{" "}
+          for how each registrar is reached.
         </p>
       </LegalSection>
 

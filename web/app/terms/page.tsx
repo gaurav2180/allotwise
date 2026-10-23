@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
   return (
-    <LegalShell title="Terms of use" updated="5 September 2026">
+    <LegalShell title="Terms of use" updated="21 October 2026">
       <LegalSection title="1. Agreement">
         <p>
           These terms govern use of Allotwise — the allotment-status, grey market premium, subscription and
@@ -27,10 +27,10 @@ export default function TermsPage() {
 
       <LegalSection title="2. What the service does">
         <p>
-          Allotwise looks up IPO allotment status against the registrar for the IPO you pick (KFintech or Link
-          Intime / MUFG Intime today; Bigshare is a deep link to Bigshare&rsquo;s own status page, since its
-          captcha can&rsquo;t be solved automatically). Alongside that, it shows grey market premium, live
-          subscription figures, and an IPO calendar, gathered from the public sources named in the{" "}
+          Allotwise looks up IPO allotment status against the registrar for the IPO you pick — KFintech, Link
+          Intime / MUFG Intime, Bigshare, or Maashitla, whichever one the issue uses. Alongside that, it shows
+          grey market premium, live subscription figures, and an IPO calendar, gathered from the public
+          sources named in the{" "}
           <Link href="/disclaimer" className="underline underline-offset-2 hover:no-underline">
             Disclaimer
           </Link>

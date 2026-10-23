@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 32">
+  <g>
+    <rect x="2" y="2" width="12.5" height="12.5" rx="2.5" fill="#15151A" />
+    <rect x="17.5" y="2" width="12.5" height="12.5" rx="2.5" fill="#15151A" />
+    <rect x="2" y="17.5" width="12.5" height="12.5" rx="2.5" fill="#15151A" />
+    <rect x="17.5" y="17.5" width="12.5" height="12.5" rx="2.5" fill="none" stroke="#15151A" stroke-width="2" />
+  </g>
+  <text x="42" y="21.5" font-family="Geist, Arial, sans-serif" font-size="16" font-weight="600" fill="#15151A" letter-spacing="-0.3">Allot<tspan font-weight="400" fill="#6B6B72">wise</tspan></text>
+</svg>
