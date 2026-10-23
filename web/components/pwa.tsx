@@ -380,8 +380,7 @@ function InstallSheet({ platform: p, firefox, onClose }: { platform: Platform; f
         <ol className="mt-5 space-y-4">{p === "ios" ? <IosSteps /> : <AndroidSteps firefox={firefox} />}</ol>
 
         <p className="mt-5 rounded-control bg-chip px-3 py-2 text-[12px] leading-relaxed text-dim">
-          Allotwise then opens from your home screen like an app, and shows the last IPO list even without a
-          connection.
+          Allotwise then opens from your home screen like an app.
         </p>
       </div>
     </div>
@@ -437,7 +436,7 @@ export function InstallCard() {
         <div className="text-[13px] font-medium">Install Allotwise</div>
         <p className="mt-0.5 text-[12px] leading-snug text-dim">
           {state.kind === "button" ? (
-            <>Opens like an app, even offline.</>
+            <>Opens from your home screen like an app.</>
           ) : (
             <>
               Open this page in <span className="font-medium text-text">Safari</span> or{" "}
