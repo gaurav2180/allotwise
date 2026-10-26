@@ -1,6 +1,6 @@
 import { CheckIcon } from "@phosphor-icons/react";
 import type { IpoListItem } from "@/lib/schemas";
-import { cn, derivePhase, describeAllotmentDate, formatDate, relativeDay } from "@/lib/utils";
+import { allotmentOverdue, cn, derivePhase, describeAllotmentDate, formatDate, relativeDay } from "@/lib/utils";
 
 type StepState = "done" | "now" | "next";
 
@@ -78,7 +78,9 @@ export function AwaitingAllotment({ ipo, now }: { ipo: IpoListItem; now: Date })
 
   const result = !due
     ? "The PAN check opens here once results are out."
-    : dueToday
+    : allotmentOverdue(ipo, now)
+      ? `Allotment was due ${formatDate(due)}, but the registrar hasn’t published results yet. The PAN check opens here as soon as it does — no need to refresh.`
+      : dueToday
       ? "Results are due today. The PAN check opens here as soon as they’re published — no need to refresh."
       : `Results are expected ${describeAllotmentDate(due, now)}. The PAN check opens here once they’re out.`;
   const lead =

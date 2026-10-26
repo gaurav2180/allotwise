@@ -139,19 +139,50 @@ export function allotmentOut(ipo: { allotmentDate?: string | null }, now = new D
 }
 
 /**
+ * Days after its allotment date that an issue whose registrar we check
+ * ourselves may stay awaited, if that registrar never shows it. A backstop
+ * for an issue filed under a name we fail to match, not the normal path.
+ */
+export const REGISTRAR_GRACE_DAYS = 3;
+
+/**
  * Whether an issue belongs with the published results rather than the ones
- * still awaited. Stricter than `allotmentOut` on the day itself: registrars
- * publish some time on the allotment date, often in the evening, so until the
- * registrar actually has it (`allotment.available`) an issue due today is
- * still awaited. A date already past counts as out even when the registrar is
- * one only reachable by link, so nothing waits forever on a check we can't make.
+ * still awaited.
+ *
+ * Published means the registrar actually has it (`allotment.available`), or
+ * the issue has listed. The allotment date alone is not enough: registrars
+ * publish some time after it -- in the evening, or a day or more late for the
+ * largest issues -- and an issue shown as allotted before then offers a check
+ * that can only come back empty. So an issue at a registrar we check ourselves
+ * stays awaited until that registrar shows it, for up to
+ * REGISTRAR_GRACE_DAYS after the date. One whose registrar we can only link
+ * to counts as out the day after its date, since nothing here could ever see
+ * it arrive.
  */
 export function allotmentPublished(
-  ipo: { allotmentDate?: string | null; allotment: { available: boolean }; listedOn?: string | null; listing?: unknown },
+  ipo: {
+    allotmentDate?: string | null;
+    allotment: { available: boolean; inApp?: boolean };
+    listedOn?: string | null;
+    listing?: unknown;
+  },
   now = new Date()
 ): boolean {
   if (ipo.allotment.available || ipo.listedOn || ipo.listing) return true;
-  return Boolean(ipo.allotmentDate && ipo.allotmentDate < localDate(now));
+  if (!ipo.allotmentDate) return false;
+  const today = localDate(now);
+  if (ipo.allotmentDate >= today) return false;
+  if (!ipo.allotment.inApp) return true;
+  const sinceDue = daysUntil(ipo.allotmentDate, now);
+  return sinceDue !== null && -sinceDue > REGISTRAR_GRACE_DAYS;
+}
+
+/** Due, not yet published by a registrar we check: the date has passed. */
+export function allotmentOverdue(
+  ipo: { allotmentDate?: string | null; allotment: { available: boolean; inApp?: boolean }; listedOn?: string | null; listing?: unknown },
+  now = new Date()
+): boolean {
+  return !allotmentPublished(ipo, now) && Boolean(ipo.allotmentDate && ipo.allotmentDate < localDate(now));
 }
 
 /**

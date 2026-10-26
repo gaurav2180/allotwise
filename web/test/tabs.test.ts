@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { bucketOf } from "@/components/ipo-list";
+import { stateLine } from "@/components/ipo-row";
 import { derivePhase } from "@/lib/utils";
 import type { IpoListItem } from "@/lib/schemas";
 
@@ -56,6 +57,19 @@ describe("tabs", () => {
     expect(bucketOf(row(closedYesterday), new Date(2026, 9, 17, 0, 1))).toBe(
       "allotted",
     );
+  });
+
+  it("keeps an issue at a registrar we check in Awaiting past its date until that registrar publishes", () => {
+    // Jio Platforms: KFintech, allotment due 26 Oct, not on KFintech's list the next day.
+    const jio = row({ openDate: "2026-10-21", closeDate: "2026-10-23", allotmentDate: "2026-10-26", allotment: { available: false, inApp: true } });
+    const oct = (d: number, h = 10) => new Date(2026, 9, d, h);
+    expect(bucketOf(jio, oct(27))).toBe("awaiting");
+    expect(stateLine(jio, oct(27))).toBe("Awaiting registrar results");
+    expect(bucketOf(jio, oct(29, 23))).toBe("awaiting");
+    // The backstop: not forever, in case it is filed under a name we miss.
+    expect(bucketOf(jio, oct(30))).toBe("allotted");
+    // Published: Allotted at once.
+    expect(bucketOf({ ...jio, allotment: { available: true, ipo: "jio" } }, oct(27))).toBe("allotted");
   });
 
   it("counts a listed issue as Allotted whatever its dates say", () => {

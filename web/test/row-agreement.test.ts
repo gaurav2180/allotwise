@@ -28,7 +28,7 @@ const day = (n: number) => {
  * Every shape an issue's dates take in practice: openings spread over the
  * month, a one- or four-day window, allotment one or three days after close,
  * listing two after that — each date possibly not announced yet — under every
- * scraped status, with and without the registrar having published.
+ * scraped status, published or not, at a registrar we check or only link to.
  */
 function* issues(): Generator<IpoListItem> {
   for (const open of [null, 0, 5, 10]) {
@@ -37,7 +37,7 @@ function* issues(): Generator<IpoListItem> {
         for (const listLag of [2]) {
           for (const known of ["all", "no-allotment", "no-listing", "status-only"] as const) {
             for (const status of ["upcoming", "open", "closed"]) {
-              for (const available of [false, true]) {
+              for (const reg of ["published", "link-only", "in-app"] as const) {
                 const o = open;
                 const c = o === null ? null : o + window;
                 const a = c === null ? null : c + lag;
@@ -52,7 +52,8 @@ function* issues(): Generator<IpoListItem> {
                   listingDate: dated && known !== "no-listing" && l !== null ? day(l) : null,
                   // As the API sets it: listed once the listing date has come.
                   listedOn: null,
-                  allotment: available ? { available: true, ipo: "x" } : { available: false },
+                  allotment:
+                    reg === "published" ? { available: true, ipo: "x" } : { available: false, inApp: reg === "in-app" },
                 } as IpoListItem;
               }
             }

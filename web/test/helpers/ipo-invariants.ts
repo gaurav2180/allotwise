@@ -25,7 +25,7 @@ export function rowProblems(ipo: IpoListItem, now: Date): string[] {
 
   const lineFits: Record<string, RegExp> = {
     allotted: /^(Allotment out|Listed)/,
-    awaiting: /^(Closed — allotment pending|Allotment due today)$/,
+    awaiting: /^(Closed — allotment pending|Allotment due today|Awaiting registrar results)$/,
     ongoing: /^(Closes|Open)/,
     upcoming: /^(Opens|Upcoming)/,
   };

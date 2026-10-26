@@ -40,6 +40,10 @@ export const calendarRowSchema = z.object({
     // Present only when available — and it is the REGISTRAR slug, which differs
     // from the market slug (`esds-software` vs `esds-software-solution-ipo`).
     ipo: z.string().optional(),
+    // Whether the issue's registrar is one the app checks itself. Such an
+    // issue is awaited until that registrar actually publishes it, not merely
+    // until its allotment date passes.
+    inApp: z.boolean().optional(),
   }),
   // The issue's registrar and its own allotment-status page, for checking by
   // hand when the in-app check is not available for this issue.

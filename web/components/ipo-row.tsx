@@ -24,6 +24,7 @@ import type { IpoListItem } from "@/lib/schemas";
 import type { PanEntry } from "@/lib/pan";
 import {
   allotmentOut,
+  allotmentOverdue,
   allotmentPublished,
   cn,
   derivePhase,
@@ -51,6 +52,7 @@ export function stateLine(ipo: IpoListItem, now = new Date()): string {
   if (allotmentPublished(ipo, now)) return "Allotment out";
   // The date has come but the registrar has not published yet: it sits in
   // Awaiting, and the line says why.
+  if (allotmentOverdue(ipo, now)) return "Awaiting registrar results";
   if (allotmentOut(ipo, now)) return "Allotment due today";
 
   // Derived from dates, not the scraped status, which goes stale overnight.

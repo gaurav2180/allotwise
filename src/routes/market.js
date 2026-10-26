@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { listMarketIpos, getMarketIpoBySlug, registrarSlugForMarket, getDaywise, saveDaywise } from '../db/index.js';
 import { availableSources, mergeBySlug, source } from '../gmp/index.js';
 import { alignLatest } from '../gmp/alignLatest.js';
+import { registrarModuleFor } from '../lib/coverage.js';
 import { logger } from '../lib/logger.js';
 import { parseSlug } from '../lib/validate.js';
 import { badRequest, notFound } from '../lib/errors.js';
@@ -61,7 +62,11 @@ marketRouter.get('/calendar', (req, res, next) => {
           sourceUpdatedAt: i.sourceUpdatedAt,
           logo: i.logo,
           listingPrice: i.listingPrice,
-          allotment: link ? { available: true, ipo: link.registrar_slug } : { available: false },
+          // inApp: whether we query this issue's registrar ourselves, so the app
+          // can wait for it to publish rather than going by the date alone.
+          allotment: link
+            ? { available: true, ipo: link.registrar_slug }
+            : { available: false, inApp: Boolean(registrarModuleFor(i.registrarName)) },
           // Where to check by hand when the in-app check is not available.
           registrar: i.registrarName || i.registrarUrl ? { name: i.registrarName, url: i.registrarUrl } : null,
         };
